@@ -34,8 +34,8 @@ def generate_launch_description():
 	# 			arguments = [name,'Odom']
 	# 			) for name in mobile_sensors ])
 	
-	execs.extend([Node(package = 'fim_track_2',
-			executable = 'distributed_seeking',
+	execs.extend([Node(package = 'dist_bo',
+			executable = 'distributed_exploration',
 			arguments = [name,'Odom',','.join(nb[name])]
 			) for name in mobile_sensors ])
 

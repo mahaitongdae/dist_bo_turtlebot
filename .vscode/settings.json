@@ -1,15 +1,15 @@
 {
     "python.autoComplete.extraPaths": [
         "/home/mht/turtlebot3_ws/install/py_launch_example/lib/python3.8/site-packages",
-        "/home/mht/turtlebot3_ws/build/fim_track_2",
-        "/home/mht/turtlebot3_ws/install/fim_track_2/lib/python3.8/site-packages",
+        "/home/mht/turtlebot3_ws/build/dist_bo",
+        "/home/mht/turtlebot3_ws/install/dist_bo/lib/python3.8/site-packages",
         "/home/mht/turtlebot3_ws/install/dist_bo/lib/python3.8/site-packages",
         "/opt/ros/foxy/lib/python3.8/site-packages"
     ],
     "python.analysis.extraPaths": [
         "/home/mht/turtlebot3_ws/install/py_launch_example/lib/python3.8/site-packages",
-        "/home/mht/turtlebot3_ws/build/fim_track_2",
-        "/home/mht/turtlebot3_ws/install/fim_track_2/lib/python3.8/site-packages",
+        "/home/mht/turtlebot3_ws/build/dist_bo",
+        "/home/mht/turtlebot3_ws/install/dist_bo/lib/python3.8/site-packages",
         "/home/mht/turtlebot3_ws/install/dist_bo/lib/python3.8/site-packages",
         "/opt/ros/foxy/lib/python3.8/site-packages"
     ]

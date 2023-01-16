@@ -18,7 +18,7 @@ from rclpy.node import Node
 
 
 tools_root = os.path.join(os.path.dirname(__file__))
-sys.path.insert(0, os.path.abspath(tools_root))
+sys.path.insert(0, '/home/mht/turtlebot3_ws/src/dist_bo/dist_bo') #todo:temp solution
 
 # General dependencies
 from ros2_utils.robot_listener import robot_listener
@@ -63,7 +63,7 @@ def get_control_action(waypoints,curr_x):
 	return uhat
 
 class distributed_seeking(Node):
-	def __init__(self, robot_namespace, pose_type_string,neighborhood_namespaces=None, xlims=[-np.inf,np.inf], ylims = [-np.inf,np.inf]):
+	def __init__(self, robot_namespace, pose_type_string, neighborhood_namespaces=None, xlims=[-np.inf,np.inf], ylims = [-np.inf,np.inf]):
 		super().__init__(node_name = 'distributed_seeking', namespace = robot_namespace)
 		self.pose_type_string = pose_type_string
 		self.robot_namespace = robot_namespace
@@ -99,11 +99,14 @@ class distributed_seeking(Node):
 		
 		# self.FIM_consensus_timer = self.create_timer(self.FIM_consensus_sleep_time,self.FIM_consensus_callback)		
 
-		# self.motion_sleep_time = 0.1
+		self.motion_sleep_time = 0.1
 		
-		self.motion_sleep_time = 0.5
+		# self.motion_sleep_time = 0.5
 
 		self.motion_timer = self.create_timer(self.motion_sleep_time,self.simple_motion_callback)
+
+		# self.visulize_sleep_tme = 0.1
+		# self.visulize_timer = self.create_timer(self.visulize_sleep_tme, self.placeholder)
 
 
 		# """ 
@@ -142,7 +145,7 @@ class distributed_seeking(Node):
 		# self.FIM = np.ones((2,2))*1e-4
 		# self.cons = consensus_handler(self,robot_namespace,neighborhood_namespaces,self.FIM,topic_name = 'FIM',qos=qos)
 		
-		# self.waypoint_pub = self.create_publisher(Float32MultiArray,'waypoints',qos)
+		self.waypoint_pub = self.create_publisher(Float32MultiArray,'waypoints',qos)
 	
 		"""
 		Motion control initializations
@@ -458,6 +461,7 @@ class distributed_seeking(Node):
 			self.control_actions = deque(get_control_action(self.waypoints,curr_x))
 
 			# self.get_logger().info("Waypoints:{}".format(self.waypoints))
+			wp_proj = self.waypoints
 			waypoint_out = Float32MultiArray()
 			waypoint_out.data = list(wp_proj.flatten())
 			self.waypoint_pub.publish(waypoint_out)
@@ -560,16 +564,16 @@ def main(args=sys.argv):
 	# if arguments >= position:
 	# 	robot_namespace = args_without_ros[position]
 	
-	# if arguments >= position+1:
-	# 	pose_type_string = args_without_ros[position+1]
-	# else:
-	# 	pose_type_string = prompt_pose_type_string()
+	if arguments >= position+1:
+		pose_type_string = args_without_ros[position+1]
+	else:
+		pose_type_string = prompt_pose_type_string()
 	
-	# if arguments >= position+2:
-	# 	neighborhood = set(args_without_ros[position+2].split(','))
-	# else:
-	# 	neighborhood = set(['MobileSensor{}'.format(n) for n in range(1,5)])
-	neighborhood = set(['MobileSensor1'])
+	if arguments >= position+2:
+		neighborhood = set(args_without_ros[position+2].split(','))
+	else:
+		# neighborhood = set(['MobileSensor{}'.format(n) for n in range(1,5)])
+		neighborhood = set(['MobileSensor1'])
 	
 	
 	qhat_0 = (np.random.rand(2)-0.5)*0.5+np.array([1.5,2])
@@ -595,7 +599,7 @@ def main(args=sys.argv):
 	            y_max = y_max,
 	            y_min = y_min)
 
-	de = distributed_seeking(robot_namespace,pose_type_string, estimator, neighborhood_namespaces = neighborhood,
+	de = distributed_seeking(robot_namespace,pose_type_string, neighborhood_namespaces = neighborhood,
 							xlims=[x_min-1,x_max+1],
 							ylims=[y_min-1,y_max+1])
 	
