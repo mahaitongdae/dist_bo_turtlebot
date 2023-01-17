@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'distributed_exploration = dist_bo.distributed_exploration:main',
             'visualize = dist_bo.visualization:main',
+            'virtual_source = dist_bo.virtual_source_func:main',
         ],
     },
 )

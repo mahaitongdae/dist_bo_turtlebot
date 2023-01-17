@@ -4,7 +4,7 @@ import rclpy
 from rclpy.qos import QoSProfile
 from rcl_interfaces.srv import GetParameters
 
-from std_msgs.msg import Float32MultiArray,Float32
+from std_msgs.msg import Float32MultiArray,Float32,Bool
 
 from ros2_utils.pose import get_pose_type_and_topic,toxy,toyaw
 
@@ -26,15 +26,18 @@ class robot_listener:
 		
 		self.light_topic="/{}/sensor_readings".format(robot_namespace)
 		self.coef_topic="/{}/sensor_coefs".format(robot_namespace)
+		self.reach_target_topic="/{}/reach_target".format(robot_namespace)
 		self.robot_pose_stack = deque(maxlen=10)
 		self.light_readings_stack = deque(maxlen=10)
+		self.reach_target_stack = deque(maxlen=10)
 
 		
 		qos = QoSProfile(depth=10)
 
 		controller_node.create_subscription(self.pose_type, self.rpose_topic,self.robot_pose_callback_,qos)
-		controller_node.create_subscription(Float32MultiArray,self.light_topic, self.light_callback_,qos)
-		controller_node.create_subscription(Float32MultiArray,self.coef_topic,self.coef_callback_,qos)
+		controller_node.create_subscription(Float32MultiArray, self.light_topic, self.light_callback_,qos)
+		controller_node.create_subscription(Float32MultiArray, self.coef_topic,self.coef_callback_,qos)
+		controller_node.create_subscription(Bool, self.reach_target_topic, self.reach_target_callback_,qos)
 	
 		self.coefs = {}
 
@@ -60,6 +63,8 @@ class robot_listener:
 	def get_coefs(self):
 		return self.coefs
 
+	def if_target_reached(self):
+		return self.reach_target_stack[-1]
 
 	def robot_pose_callback_(self,data):
 		self.robot_pose_stack.append(data)
@@ -73,3 +78,6 @@ class robot_listener:
 		self.coefs['b'] = d[1]
 		self.coefs['C0'] = d[2]
 		self.coefs['C1'] = d[3] 
+
+	def reach_target_callback_(self, data):
+		self.reach_target_stack.append(data.data)

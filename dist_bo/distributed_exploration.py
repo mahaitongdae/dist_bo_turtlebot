@@ -1,4 +1,4 @@
-# The big distributed seeking node. This reduces the number of topic subscription needed.
+# The distributed exploration node. This reduces the number of topic subscription needed.
 import os
 import sys
 import traceback
@@ -8,17 +8,20 @@ import numpy as np
 
 from functools import partial
 from collections import deque
+import matplotlib.pyplot as plt
 
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Float32MultiArray,Bool,String
+from std_msgs.msg import Float32MultiArray,Bool,String,Float32
 import rclpy
 from rclpy.qos import QoSProfile
 from rclpy.node import Node
 
+from custom_interfaces.srv import Query2DFunc
+
 
 
 tools_root = os.path.join(os.path.dirname(__file__))
-sys.path.insert(0, '/home/mht/turtlebot3_ws/src/dist_bo/dist_bo') #todo:temp solution
+sys.path.insert(0, os.path.abspath(tools_root))
 
 # General dependencies
 from ros2_utils.robot_listener import robot_listener
@@ -48,6 +51,8 @@ from collision_avoidance.regions import RegionsIntersection
 
 
 COEF_NAMES = ['C1','C0','k','b']
+VISUALIZE = True
+REACH_DIST = 1.
 
 def get_control_action(waypoints,curr_x):
 	if len(waypoints)==0:
@@ -76,6 +81,9 @@ class distributed_seeking(Node):
 
 		self.robot_listeners = {namespace:robot_listener(self,namespace,self.pose_type_string)\
 						 for namespace in neighborhood_namespaces}
+
+		# State definition
+		self.obs_published = False
 
 
 
@@ -131,6 +139,12 @@ class distributed_seeking(Node):
 
 		# self.q_hat = self.estimator.get_q()
 
+		if VISUALIZE:
+			self.plot_time = 0.1
+			self.plot_timer = self.create_timer(self.plot_time, self.plot_callback)
+			plt.ion()
+			self.fig, self.ax = plt.subplots()
+
 		""" 
 		Waypoint planning initializations 
 		"""
@@ -182,6 +196,26 @@ class distributed_seeking(Node):
 		# current control actions
 		self.v = 0.0
 		self.omega = 0.0
+
+		# receiving query
+		qos = QoSProfile(depth=10)
+		self.create_subscription(Float32MultiArray, 'bo_central/queries', self.new_query_callback, qos)
+
+		# pub observation
+		self.observe_publisher = self.create_publisher(Float32, 'observation', qos)
+
+		# client for querying function
+		self.query_func = self.create_client(Query2DFunc, 'query_2d_func', qos)
+		while not self.query_func.wait_for_service(timeout_sec=1.0):
+			self.get_logger().info('service not available, waiting again...')
+		self.req = Query2DFunc.Request()
+
+	def send_query(self, x, y):
+		self.req.x = x
+		self.req.y = y
+		self.future = self.query_func.call_async(self.req)
+		rclpy.spin_until_future_complete(self, self.future)
+		return self.future.result()
 
 	def FIRST_FOUND_callback_(self,data):
 		
@@ -377,8 +411,8 @@ class distributed_seeking(Node):
 		if self.MOVE:
 			my_loc = self.get_my_loc()
 			my_coefs = self.get_my_coefs()
-			target_loc = np.array([1.,-2.5])
-			self.waypoints = WaypointPlanning.straight_line(target_loc,my_loc\
+			self.target_loc = np.array([1.,-2.5])
+			self.waypoints = WaypointPlanning.straight_line(self.target_loc,my_loc\
 														,planning_horizon = 20\
 														,step_size = self.waypoint_sleep_time * BURGER_MAX_LIN_VEL)	
 
@@ -451,39 +485,70 @@ class distributed_seeking(Node):
 	def simple_motion_callback(self):
 		loc = self.get_my_loc()
 		yaw = self.get_my_yaw()
-		# self.get_logger().info('loc:{} yaw:{}'.format(loc,yaw))
+		self.get_logger().info('loc:{} yaw:{}'.format(loc,yaw))
+		dist_to_target_loc = np.linalg.norm(loc - self.target_loc, 2)
+		reach_target = dist_to_target_loc < REACH_DIST
 
 		if len(self.waypoints)==0:
 			self.get_logger().info("Running out of waypoints.")
 
-		if (not loc is None) and (not yaw is None) and len(self.waypoints)>0:
-			curr_x = np.array([loc[0],loc[1],yaw])		
-			self.control_actions = deque(get_control_action(self.waypoints,curr_x))
+		if reach_target:
+			if (not loc is None) and (not yaw is None) and len(self.waypoints)>0:
+				curr_x = np.array([loc[0],loc[1],yaw])		
+				self.control_actions = deque(get_control_action(self.waypoints,curr_x))
 
-			# self.get_logger().info("Waypoints:{}".format(self.waypoints))
-			wp_proj = self.waypoints
-			waypoint_out = Float32MultiArray()
-			waypoint_out.data = list(wp_proj.flatten())
-			self.waypoint_pub.publish(waypoint_out)
+				# self.get_logger().info("Waypoints:{}".format(self.waypoints))
+				wp_proj = self.waypoints
+				waypoint_out = Float32MultiArray()
+				waypoint_out.data = list(wp_proj.flatten())
+				self.waypoint_pub.publish(waypoint_out)
 
-		if len(self.control_actions)>0:
-			# Pop and publish the left-most control action.
-			[v,omega] = self.control_actions.popleft()
-			[v,omega] = bounded_change_update(v,omega,self.v,self.omega) # Get a vel_msg that satisfies max change and max value constraints.
-			vel_msg = turtlebot_twist(v,omega)
+			if len(self.control_actions)>0:
+				# Pop and publish the left-most control action.
+				[v,omega] = self.control_actions.popleft()
+				[v,omega] = bounded_change_update(v,omega,self.v,self.omega) # Get a vel_msg that satisfies max change and max value constraints.
+				vel_msg = turtlebot_twist(v,omega)
 
-			# Update current v and omega
-			self.v = v
-			self.omega = omega
-			self.vel_pub.publish(vel_msg)
-			# self.get_logger().info('{}'.format(vel_msg))
+				# Update current v and omega
+				self.v = v
+				self.omega = omega
+				self.vel_pub.publish(vel_msg)
+				# self.get_logger().info('{}'.format(vel_msg))
+			else:
+				self.vel_pub.publish(stop_twist())
+
+				# Update current v and omega
+				self.v = 0.0
+				self.omega = 0.0
 		else:
+			self.get_logger().info("Reach target.")
 			self.vel_pub.publish(stop_twist())
+			if not self.obs_published:
+				obs = self.send_query(self.get_my_loc())
+				msg = Float32()
+				msg.data = obs
+				self.observe_publisher.publish(msg)
+				self.obs_published = True
 
-			# Update current v and omega
-			self.v = 0.0
-			self.omega = 0.0
 
+	def plot_callback(self):
+		try:
+			self.ax.plot(self.waypoints[:,0],self.waypoints[:,1])
+			my_loc = self.get_my_loc()
+			print(my_loc,type(my_loc))
+			self.ax.scatter(my_loc[0],my_loc[1],c='Red',s=20)
+			plt.xlim(0, 1.2)
+			plt.ylim(-3, 0)
+			plt.pause(0.05)
+			plt.cla()
+		except:
+			pass
+
+	def new_query_callback(self, data):
+		query_points = data.data
+		self.target_loc = (query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1])
+		self.get_logger().info('Get new target at ({}, {})'.format(query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1]))
+		self.obs_published = False
 
 	def motion_callback(self):
 		"""
@@ -544,9 +609,6 @@ class distributed_seeking(Node):
 		else:
 			self.vel_pub.publish(stop_twist())
 			self.motion_reset()
-		
-		
-	
 
 
 
@@ -577,27 +639,18 @@ def main(args=sys.argv):
 	
 	
 	qhat_0 = (np.random.rand(2)-0.5)*0.5+np.array([1.5,2])
-	# qhat_0 = np.array([-1,-0.0])
-	# qhat_0 = np.array([-1,0])
-	# qhat_0 = np.array([4,-1])
-	# qhat_0 = np.array([3,0])
-	
-
-
-	# estimator = ConsensusEKF(qhat_0)
-	# estimator = ConsensusEKF(qhat_0,C_gain=0.1)
 
 	x_max = 3
 	x_min = 0
 	y_max = 4
 	y_min = 0
 	
-	estimator = ConsensusEKF(qhat_0,R_mag=10,Q_mag = 10,C_gain=0.1,\
-		       # Dimensions about the lab, fixed.
-	            x_max = x_max,
-	            x_min = x_min,
-	            y_max = y_max,
-	            y_min = y_min)
+	# estimator = ConsensusEKF(qhat_0,R_mag=10,Q_mag = 10,C_gain=0.1,\
+	# 	       # Dimensions about the lab, fixed.
+	#             x_max = x_max,
+	#             x_min = x_min,
+	#             y_max = y_max,
+	#             y_min = y_min)
 
 	de = distributed_seeking(robot_namespace,pose_type_string, neighborhood_namespaces = neighborhood,
 							xlims=[x_min-1,x_max+1],
