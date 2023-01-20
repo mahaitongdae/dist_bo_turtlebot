@@ -38,15 +38,23 @@ class Visulizer(Node):
         # plt.show()
 
     def listener_callback(self, msg):
-        # self.get_logger().info('I heard: "%s"' % msg.data)
+        self.get_logger().info('msg data type "%s"' % type(msg.data))
+        self.get_logger().info('msg data len "%s"' % len(msg.data))
         self.waypoints = np.reshape(np.asarray(msg.data),[-1, 2])
     
     def plot_callback(self):
-        self.ax.plot(self.waypoints[:,0],self.waypoints[:,1])
-        plt.xlim(0, 1.2)
-        plt.ylim(-3, 0)
-        plt.pause(0.05)
-        plt.cla()
+        try:
+            self.ax.plot(self.waypoints[:,0],self.waypoints[:,1])
+            # my_loc = self.get_my_loc()
+            # print(my_loc,type(my_loc))
+            # self.ax.scatter(my_loc[0],my_loc[1],c='Red',s=20)
+            plt.xlim(0, 1.2)
+            plt.ylim(-3, 0)
+            plt.pause(0.05)
+            plt.cla()
+        except:
+            pass
+
 
     def _opengl_start(self):
         glutInit()

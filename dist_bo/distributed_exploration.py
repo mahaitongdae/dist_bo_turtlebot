@@ -15,10 +15,10 @@ from std_msgs.msg import Float32MultiArray,Bool,String,Float32
 import rclpy
 from rclpy.qos import QoSProfile
 from rclpy.node import Node
+from example_interfaces.srv import AddTwoInts
 
 from custom_interfaces.srv import Query2DFunc
-
-
+import math
 
 tools_root = os.path.join(os.path.dirname(__file__))
 sys.path.insert(0, os.path.abspath(tools_root))
@@ -28,14 +28,13 @@ from ros2_utils.robot_listener import robot_listener
 from ros2_utils.pose import prompt_pose_type_string
 from ros2_utils.misc import get_sensor_names
 
-
 # Estimation dependencies
 from estimation.ConsensusEKF import ConsensusEKF 
 from util_func import joint_meas_func, analytic_dhdz, top_n_mean
 
 # Waypoint planning dependencies
 from motion_control import WaypointPlanning
-
+from motion_control.SimplePositionControl import Turtlebot3Path
 from motion_control.WaypointTracking import BURGER_MAX_LIN_VEL
 
 from util_func import analytic_dLdp, joint_F_single
@@ -51,7 +50,7 @@ from collision_avoidance.regions import RegionsIntersection
 
 
 COEF_NAMES = ['C1','C0','k','b']
-VISUALIZE = True
+VISUALIZE = False
 REACH_DIST = 1.
 
 def get_control_action(waypoints,curr_x):
@@ -82,10 +81,13 @@ class distributed_seeking(Node):
 		self.robot_listeners = {namespace:robot_listener(self,namespace,self.pose_type_string)\
 						 for namespace in neighborhood_namespaces}
 
+		self.id = int(robot_namespace[-1])
 		# State definition
 		self.obs_published = False
-
-
+		self.target_reached = False
+		self.target_loc_updated = True
+		self.position_control_step = 1
+		self.central_all_obs_received = False
 
 		qos = QoSProfile(depth=10)
 
@@ -93,51 +95,12 @@ class distributed_seeking(Node):
 		Timer initialization
 		"""
 
-		# self.est_sleep_time = 0.1
-
-		# self.est_sleep_time = 2
-		
-		# self.estimation_timer = self.create_timer(self.est_sleep_time,self.est_callback)
-
-		self.waypoint_sleep_time = 0.5
-
-		self.waypoint_timer = self.create_timer(self.waypoint_sleep_time,self.simple_waypoint_callback)
-
-		# self.FIM_consensus_sleep_time = 0.1
-		
-		# self.FIM_consensus_timer = self.create_timer(self.FIM_consensus_sleep_time,self.FIM_consensus_callback)		
+		# self.waypoint_sleep_time = 0.5
+		# self.waypoint_timer = self.create_timer(self.waypoint_sleep_time,self.simple_waypoint_callback)
 
 		self.motion_sleep_time = 0.1
-		
-		# self.motion_sleep_time = 0.5
+		self.motion_timer = self.create_timer(self.motion_sleep_time,self.simple_position_callback)
 
-		self.motion_timer = self.create_timer(self.motion_sleep_time,self.simple_motion_callback)
-
-		# self.visulize_sleep_tme = 0.1
-		# self.visulize_timer = self.create_timer(self.visulize_sleep_tme, self.placeholder)
-
-
-		# """ 
-		# Estimation initializations 
-		# """
-
-		# self.z_hat_listeners = \
-		# {namespace:
-		# self.create_subscription(
-		# 	Float32MultiArray,
-		# 	'/{}/z_hat'.format(namespace),
-		# 	partial(self.z_hat_callback,namespace = namespace),
-		# 	qos)
-		# 	for namespace in neighborhood_namespaces}
-
-		# self.nb_zhats = {namespace:[] for namespace in neighborhood_namespaces}
-
-		# self.z_hat_pub = self.create_publisher(Float32MultiArray,'z_hat',qos)
-		# self.q_hat_pub = self.create_publisher(Float32MultiArray,'q_hat',qos)
-
-		# self.estimator = estimator
-
-		# self.q_hat = self.estimator.get_q()
 
 		if VISUALIZE:
 			self.plot_time = 0.1
@@ -149,15 +112,16 @@ class distributed_seeking(Node):
 		Waypoint planning initializations 
 		"""
 			
-		# Temporary hard-coded waypoints used in devel.	
+		# # Temporary hard-coded waypoints used in devel.	
 		self.waypoints = np.array([[1.,-2.5],[2.,-1.5],[3,-0.5]])
-		# self.waypoints = np.array([[3,-0.5]])
+		# # self.waypoints = np.array([[3,-0.5]])
+		self.target_loc = np.array([1.,-2.5])
 
-		self.F = 0
+		# self.F = 0
 
-		# # FIM consensus handler
-		# self.FIM = np.ones((2,2))*1e-4
-		# self.cons = consensus_handler(self,robot_namespace,neighborhood_namespaces,self.FIM,topic_name = 'FIM',qos=qos)
+		# # # FIM consensus handler
+		# # self.FIM = np.ones((2,2))*1e-4
+		# # self.cons = consensus_handler(self,robot_namespace,neighborhood_namespaces,self.FIM,topic_name = 'FIM',qos=qos)
 		
 		self.waypoint_pub = self.create_publisher(Float32MultiArray,'waypoints',qos)
 	
@@ -171,6 +135,7 @@ class distributed_seeking(Node):
 		self.vel_pub = self.create_publisher(Twist, 'cmd_vel', qos)
 
 		self.control_actions = deque([])
+		self.controller = Turtlebot3Path()
 
 		# Obstacles are expected to be circular ones, parametrized by (loc,radius)
 		self.obstacle_detector = obstacle_detector(self)
@@ -197,25 +162,71 @@ class distributed_seeking(Node):
 		self.v = 0.0
 		self.omega = 0.0
 
-		# receiving query
+		# receiving next-query
 		qos = QoSProfile(depth=10)
-		self.create_subscription(Float32MultiArray, 'bo_central/queries', self.new_query_callback, qos)
+		self.create_subscription(Float32MultiArray, '/bo_central/queries', self.new_query_callback, qos)
+		self.create_subscription(Bool, '/bo_central/all_obs_received', )
 
 		# pub observation
-		self.observe_publisher = self.create_publisher(Float32, 'observation', qos)
+		self.obs = 0.0
+		self.observe_publisher = self.create_publisher(Float32, '/{}/observation'.format(self.robot_namespace), qos)
+		# reach target publisher
+		self.target_reached_publisher = self.create_publisher(Bool, '/{}/target_reached'.format(self.robot_namespace), qos)
+		observation_and_target_time = 0.1
+		self.create_timer(observation_and_target_time, self.publish_obs_callback)
+		self.create_timer(observation_and_target_time, self.publish_target_reached_callback)
+		self.create_timer(observation_and_target_time, self.query_virtual_source_callback)
 
-		# client for querying function
-		self.query_func = self.create_client(Query2DFunc, 'query_2d_func', qos)
-		while not self.query_func.wait_for_service(timeout_sec=1.0):
+		# client for query virtual source (will be replaced by sensor reading in real robots)
+		# self.client = self.create_client(Query2DFunc, 'query_2d_func')
+		self.client = self.create_client(Query2DFunc, '/query_2d_func')
+		
+		while not self.client.wait_for_service(timeout_sec=1.0):
 			self.get_logger().info('service not available, waiting again...')
 		self.req = Query2DFunc.Request()
 
-	def send_query(self, x, y):
-		self.req.x = x
-		self.req.y = y
-		self.future = self.query_func.call_async(self.req)
+	def send_query(self):
+		loc = self.get_my_loc()
+		self.req.x = loc[0]
+		self.req.y = loc[1]
+		self.future = self.client.call_async(self.req)
 		rclpy.spin_until_future_complete(self, self.future)
-		return self.future.result()
+		response = self.future.result()
+		self.obs = response.obj
+
+	def query_virtual_source_callback(self):
+		if self.target_reached:
+			self.send_query()
+		else:
+			pass
+
+	def central_all_obs_received_callback(self, msg):
+		self.central_all_obs_received = msg.data
+
+	def publish_obs_callback(self):
+		msg = Float32()
+		msg.data = self.obs
+		if self.target_reached is False:
+			pass
+		else:
+			if self.central_all_obs_received:
+				pass
+			else:
+				self.observe_publisher.publish(msg)
+				self.obs_published = True
+
+	def publish_target_reached_callback(self):
+		msg = Bool()
+		msg.data = self.target_reached
+		self.target_reached_publisher.publish(msg)
+
+	def new_query_callback(self, data):
+		if self.target_loc_updated is True:
+			pass
+		else:
+			self.target_loc = np.asarray([data.data[2*self.id], data.data[2*self.id+1]])
+			self.target_loc_updated = True
+
 
 	def FIRST_FOUND_callback_(self,data):
 		
@@ -233,8 +244,6 @@ class distributed_seeking(Node):
 				self.SOURCE_LOC = self.source_contact_detector.get_source_loc()
 				self.FIRST_CONTACT_ROBOT = self.robot_namespace
 
-
-
 		# The following being true means this robot has found the source and is the first one to do so.
 		# Only the FIRST_CONTACT ROBOT has the right to publish the source location. This is to avoid network jamming.
 		if (not self.SOURCE_LOC is None) and self.FIRST_CONTACT_ROBOT == self.robot_namespace: 
@@ -246,7 +255,6 @@ class distributed_seeking(Node):
 			out = String()
 			out.data = self.robot_namespace
 			self.FIRST_FOUND_pub.publish(out)
-
 
 	def est_reset(self):
 		self.estimator.reset()
@@ -262,7 +270,6 @@ class distributed_seeking(Node):
 		self.control_actions = deque([])
 		self.v = 0.0
 		self.omega = 0.0
-
 
 	def list_coefs(self,coef_dicts):
 		if len(coef_dicts)==0:
@@ -295,13 +302,6 @@ class distributed_seeking(Node):
 	def z_hat_callback(self,data,namespace):
 		self.nb_zhats[namespace] = np.array(data.data).flatten()
 
-	def consensus_weights(self,y,p):
-		# assert(len(y)==len(p))
-		# # Temporary hard-coded equally consensus weights. Making sure the consensus weights sum to one.
-		# N_neighbor = len(y)
-		# return np.ones(N_neighbor)/N_neighbor
-		return None
-
 	def process_readings(self,readings):
 		return top_n_mean(np.array(readings),4)
 
@@ -311,16 +311,13 @@ class distributed_seeking(Node):
 	
 		return analytic_dLdp(q=q_hat,ps=ps, C1s = C1, C0s = C0, ks=k, bs=b,FIM=FIM)
 	
-
 	def get_my_loc(self):
-
 		return self.robot_listeners[self.robot_namespace].get_latest_loc()
 	
 	def get_my_yaw(self):
 		return self.robot_listeners[self.robot_namespace].get_latest_yaw()
 	
 	def get_my_coefs(self):
-	
 		return self.robot_listeners[self.robot_namespace].get_coefs()
 
 	def calc_new_F(self,coef_dicts=[]):
@@ -485,50 +482,85 @@ class distributed_seeking(Node):
 	def simple_motion_callback(self):
 		loc = self.get_my_loc()
 		yaw = self.get_my_yaw()
-		self.get_logger().info('loc:{} yaw:{}'.format(loc,yaw))
-		dist_to_target_loc = np.linalg.norm(loc - self.target_loc, 2)
-		reach_target = dist_to_target_loc < REACH_DIST
+		# self.get_logger().info('loc:{} yaw:{}'.format(loc,yaw))
+		# dist_to_target_loc = np.linalg.norm(loc - self.target_loc, 2)
+		# reach_target = dist_to_target_loc < REACH_DIST
 
 		if len(self.waypoints)==0:
 			self.get_logger().info("Running out of waypoints.")
 
-		if reach_target:
-			if (not loc is None) and (not yaw is None) and len(self.waypoints)>0:
-				curr_x = np.array([loc[0],loc[1],yaw])		
-				self.control_actions = deque(get_control_action(self.waypoints,curr_x))
+		if (not loc is None) and (not yaw is None) and len(self.waypoints)>0:
+			curr_x = np.array([loc[0],loc[1],yaw])		
+			self.control_actions = deque(get_control_action(self.waypoints,curr_x))
 
-				# self.get_logger().info("Waypoints:{}".format(self.waypoints))
-				wp_proj = self.waypoints
-				waypoint_out = Float32MultiArray()
-				waypoint_out.data = list(wp_proj.flatten())
-				self.waypoint_pub.publish(waypoint_out)
+			# self.get_logger().info("Waypoints:{}".format(self.waypoints))
+			wp_proj = self.waypoints
+			waypoint_out = Float32MultiArray()
+			waypoint_out.data = list(wp_proj.flatten())
+			self.waypoint_pub.publish(waypoint_out)
 
-			if len(self.control_actions)>0:
-				# Pop and publish the left-most control action.
-				[v,omega] = self.control_actions.popleft()
-				[v,omega] = bounded_change_update(v,omega,self.v,self.omega) # Get a vel_msg that satisfies max change and max value constraints.
-				vel_msg = turtlebot_twist(v,omega)
+		if len(self.control_actions)>0:
+			# Pop and publish the left-most control action.
+			[v,omega] = self.control_actions.popleft()
+			[v,omega] = bounded_change_update(v,omega,self.v,self.omega) # Get a vel_msg that satisfies max change and max value constraints.
+			vel_msg = turtlebot_twist(v,omega)
 
-				# Update current v and omega
-				self.v = v
-				self.omega = omega
-				self.vel_pub.publish(vel_msg)
-				# self.get_logger().info('{}'.format(vel_msg))
-			else:
+			# Update current v and omega
+			self.v = v
+			self.omega = omega
+			self.vel_pub.publish(vel_msg)
+			# self.get_logger().info('{}'.format(vel_msg))
+		else:
+			self.vel_pub.publish(stop_twist())
+
+			# Update current v and omega
+			self.v = 0.0
+			self.omega = 0.0
+
+	def simple_position_callback(self):
+		twist = Twist()
+		loc = self.get_my_loc()
+		yaw = self.get_my_yaw()
+
+		if (loc is not None) and (yaw is not None):
+
+			if self.target_reached is True:
 				self.vel_pub.publish(stop_twist())
 
-				# Update current v and omega
-				self.v = 0.0
-				self.omega = 0.0
-		else:
-			self.get_logger().info("Reach target.")
-			self.vel_pub.publish(stop_twist())
-			if not self.obs_published:
-				obs = self.send_query(self.get_my_loc())
-				msg = Float32()
-				msg.data = obs
-				self.observe_publisher.publish(msg)
-				self.obs_published = True
+			else:
+				# Step 1: Turn
+				if self.position_control_step == 1:
+					path_theta = math.atan2(
+						self.target_loc[1] - loc[1],
+						self.target_loc[0] - loc[0])
+					angle = path_theta - yaw #TODO:check the coord system
+					angular_velocity = 1.0  # unit: rad/s
+					self.get_logger().info('path_theta: {:.3f}, self yaw = {:.3f}'.format(path_theta, yaw))
+					twist, self.position_control_step = self.controller.turn(angle, angular_velocity, self.position_control_step)
+
+				# Step 2: Go Straight
+				elif self.position_control_step == 2:
+					distance = math.sqrt(
+						(self.target_loc[1] - loc[1])**2 +
+						(self.target_loc[0] - loc[0])**2)
+					linear_velocity = 0.1  # unit: m/s
+					self.get_logger().info('distance: {:.3f}'.format(distance))
+					twist, self.position_control_step = self.controller.go_straight(distance, linear_velocity, self.position_control_step)
+
+				# # Step 3: Turn
+				# elif self.step == 3:
+				# 	angle = self.goal_pose_theta - self.last_pose_theta
+				# 	angular_velocity = 0.1  # unit: rad/s
+
+				# 	twist, self.step = Turtlebot3Path.turn(angle, angular_velocity, self.step)
+
+				# Reset
+				elif self.position_control_step == 3:
+					self.position_control_step = 1
+					self.target_reached = True
+					self.target_loc_updated = False
+					self.get_logger().info('Target reached!')
+				self.vel_pub.publish(twist)
 
 
 	def plot_callback(self):
@@ -544,11 +576,14 @@ class distributed_seeking(Node):
 		except:
 			pass
 
-	def new_query_callback(self, data):
-		query_points = data.data
-		self.target_loc = (query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1])
-		self.get_logger().info('Get new target at ({}, {})'.format(query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1]))
-		self.obs_published = False
+	def query_source_callback(self, data):
+		if self.target_reached is False:
+			pass
+		else:
+			query_points = data.data
+			self.target_loc = (query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1])
+			self.get_logger().info('Get new source at ({}, {})'.format(query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1]))
+			self.obs_published = False
 
 	def motion_callback(self):
 		"""

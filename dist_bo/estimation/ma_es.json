@@ -1,0 +1,19 @@
+{
+    "objective": "ackley",
+    "constraint": "disk",
+    "model": "torch",
+    "n_workers": 1,
+    "kernel": "Matern",
+    "acquisition_function": "es",
+    "policy": "greedy",
+    "unconstrained": true,
+    "decision_type": "parallel",
+    "fantasies": 0,
+    "regularization": null,
+    "regularization_strength": 0.01,
+    "pending_regularization": null,
+    "pending_regularization_strength": 0.01,
+    "grid_density": 30,
+    "n_iters": 150,
+    "n_runs": 5
+}

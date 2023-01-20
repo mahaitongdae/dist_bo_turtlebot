@@ -33,10 +33,23 @@ def generate_launch_description():
 	# 			executable = 'single_robot_controller',
 	# 			arguments = [name,'Odom']
 	# 			) for name in mobile_sensors ])
+
+	execs.extend([Node(package = 'dist_bo',
+			executable = 'virtual_source',
+			arguments = [])])
+
+	execs.extend([Node(package = 'dist_bo',
+			executable = 'centralized_decision',
+			arguments = ['Odom',])])
+
+	# execs.extend([Node(package = 'dist_bo',
+	# 		executable = 'visualize',
+	# 		arguments = [])])
 	
 	execs.extend([Node(package = 'dist_bo',
 			executable = 'distributed_exploration',
 			arguments = [name,'Odom',','.join(nb[name])]
-			) for name in mobile_sensors ])
-
+			) for name in mobile_sensors])
+	
+	
 	return LaunchDescription(execs)

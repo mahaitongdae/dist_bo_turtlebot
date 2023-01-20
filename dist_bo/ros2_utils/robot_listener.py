@@ -26,10 +26,12 @@ class robot_listener:
 		
 		self.light_topic="/{}/sensor_readings".format(robot_namespace)
 		self.coef_topic="/{}/sensor_coefs".format(robot_namespace)
-		self.reach_target_topic="/{}/reach_target".format(robot_namespace)
+		self.reach_target_topic="/{}/target_reached".format(robot_namespace)
+		self.observation_topic="/{}/observation".format(robot_namespace)
 		self.robot_pose_stack = deque(maxlen=10)
-		self.light_readings_stack = deque(maxlen=10)
+		self.observed_values_stack = deque(maxlen=10)
 		self.reach_target_stack = deque(maxlen=10)
+		self.light_readings_stack = deque(maxlen=10)
 
 		
 		qos = QoSProfile(depth=10)
@@ -38,6 +40,7 @@ class robot_listener:
 		controller_node.create_subscription(Float32MultiArray, self.light_topic, self.light_callback_,qos)
 		controller_node.create_subscription(Float32MultiArray, self.coef_topic,self.coef_callback_,qos)
 		controller_node.create_subscription(Bool, self.reach_target_topic, self.reach_target_callback_,qos)
+		controller_node.create_subscription(Float32, self.observation_topic, self.observed_value_callback,qos)
 	
 		self.coefs = {}
 
@@ -59,12 +62,21 @@ class robot_listener:
 			return self.light_readings_stack[-1]
 		else:
 			return None
+		
+	def get_observed_values(self):
+		if len(self.observed_values_stack) > 0:
+			return self.observed_values_stack[-1]
+		else:
+			return None
 
 	def get_coefs(self):
 		return self.coefs
 
-	def if_target_reached(self):
-		return self.reach_target_stack[-1]
+	def is_target_reached(self):
+		if len(self.reach_target_stack)>0:
+			return self.reach_target_stack[-1]
+		else:
+			return False
 
 	def robot_pose_callback_(self,data):
 		self.robot_pose_stack.append(data)
@@ -81,3 +93,8 @@ class robot_listener:
 
 	def reach_target_callback_(self, data):
 		self.reach_target_stack.append(data.data)
+
+	def observed_value_callback(self, data):
+		self.observed_values_stack.append(data.data)
+
+	

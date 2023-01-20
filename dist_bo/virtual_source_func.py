@@ -18,19 +18,14 @@ function_dict = {'bird':Bird(), 'disk':Disk(), 'ackley': Ackley(), 'rosenbrock':
 class VirtualSourceByFunc(Node):
     def __init__(self):
         super().__init__('virtual_source')
-
         self.declare_parameter('function_type', 'ackley')
-
-        self.srv = self.create_service(Query2DFunc, 'query_2d_func', self.query_callback)
-
         self.func = function_dict[self.get_parameter('function_type').value].function
-
-    def query_callback(self, request, response):
+        self.srv = self.create_service(Query2DFunc, 'query_2d_func', self.query_callback)
         
+    def query_callback(self, request, response):
         loc = (request.x, request.y)
         response.obj = self.func(loc)
         self.get_logger().info('Incoming request\na: %d b: %d' % (request.x, request.y))
-
         return response
 
 def main(args=None):

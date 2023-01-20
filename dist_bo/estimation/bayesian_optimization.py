@@ -2,7 +2,7 @@ import os
 import csv
 import copy
 import json
-import imageio.v2 as imageio
+# import imageio.v2 as imageio
 import datetime
 import warnings
 import itertools
@@ -880,32 +880,32 @@ class bayesian_optimization:
             plt.savefig(self._PDF_DIR_ + '/' + reward_type + '_regret.pdf', bbox_inches='tight')
             plt.savefig(self._PNG_DIR_ + '/' + reward_type + '_regret.png', bbox_inches='tight')
 
-    def _generate_gif(self, n_iters, plot):
-        if self._dim == 1:
-            plots = []
-            for i in range(n_iters+1):
-                if plot is True or i == n_iters:
-                    try:
-                        plots.append(imageio.imread(self._PNG_DIR_ + '/bo_iteration_%d.png' % (i)))
-                    except: pass
-                elif not i % plot:
-                    try:
-                        plots.append(imageio.imread(self._PNG_DIR_ + '/bo_iteration_%d.png' % (i)))
-                    except: pass
-            imageio.mimsave(self._GIF_DIR_ + '/bo.gif', plots, duration=1.0)
-        else:
-            for a in range(self.n_workers):
-                plots = []
-                for i in range(n_iters+1):
-                    if plot is True or i == n_iters:
-                        try:
-                            plots.append(imageio.imread(self._PNG_DIR_ + '/bo_iteration_%d_agent_%d.png' % (i, a)))
-                        except: pass
-                    elif not i % plot:
-                        try:
-                            plots.append(imageio.imread(self._PNG_DIR_ + '/bo_iteration_%d_agent_%d.png' % (i, a)))
-                        except: pass
-                imageio.mimsave(self._GIF_DIR_ + '/bo_agent_%d.gif' % (a), plots, duration=1.0)
+    # def _generate_gif(self, n_iters, plot):
+    #     if self._dim == 1:
+    #         plots = []
+    #         for i in range(n_iters+1):
+    #             if plot is True or i == n_iters:
+    #                 try:
+    #                     plots.append(imageio.imread(self._PNG_DIR_ + '/bo_iteration_%d.png' % (i)))
+    #                 except: pass
+    #             elif not i % plot:
+    #                 try:
+    #                     plots.append(imageio.imread(self._PNG_DIR_ + '/bo_iteration_%d.png' % (i)))
+    #                 except: pass
+    #         imageio.mimsave(self._GIF_DIR_ + '/bo.gif', plots, duration=1.0)
+    #     else:
+    #         for a in range(self.n_workers):
+    #             plots = []
+    #             for i in range(n_iters+1):
+    #                 if plot is True or i == n_iters:
+    #                     try:
+    #                         plots.append(imageio.imread(self._PNG_DIR_ + '/bo_iteration_%d_agent_%d.png' % (i, a)))
+    #                     except: pass
+    #                 elif not i % plot:
+    #                     try:
+    #                         plots.append(imageio.imread(self._PNG_DIR_ + '/bo_iteration_%d_agent_%d.png' % (i, a)))
+    #                     except: pass
+    #             imageio.mimsave(self._GIF_DIR_ + '/bo_agent_%d.gif' % (a), plots, duration=1.0)
 
 class ExactGPModel(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):
@@ -1023,7 +1023,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         self._TEMP_DIR_ = os.path.join(os.path.join(self._ROOT_DIR_, "result"), self.args.objective)
         self._ID_DIR_ = os.path.join(self._TEMP_DIR_, self._DT_)
         self._DATA_DIR_ = os.path.join(self._ID_DIR_, "data")
-        for path in [self._ROOT_DIR_,self._TEMP_DIR_, self._DATA_DIR_, self._FIG_DIR_, self._PNG_DIR_, self._PDF_DIR_, self._GIF_DIR_]:
+        for path in [self._ROOT_DIR_,self._TEMP_DIR_, self._DATA_DIR_]: #  self._FIG_DIR_, self._PNG_DIR_, self._PDF_DIR_, self._GIF_DIR_
             try:
                 os.makedirs(path, exist_ok=True)
             except FileExistsError:

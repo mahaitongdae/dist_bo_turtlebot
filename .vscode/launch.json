@@ -6,9 +6,9 @@
     "configurations": [
         {
             "name": "ROS: Launch",
+            "type": "ros",
             "request": "launch",
-            "target": "/home/mht/turtlebot3_ws/src/dist_bo/launch/ virtual_source_launch.py",
-            "type": "ros"
+            "target": "/home/mht/turtlebot3_ws/src/dist_bo/launch/simulated_distributed_seeking_launch.py"
         }
     ]
 }
