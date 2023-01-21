@@ -32,7 +32,7 @@ function_dict = {'bird':Bird(), 'disk':Disk(), 'ackley': Ackley(), 'rosenbrock':
 
 class CentralizedDecision(Node):
 
-    def __init__(self, pose_type_string):
+    def __init__(self, pose_type_string, all_robot_namespace):
         super().__init__('bo_central')
         self.pose_type_string = pose_type_string
         self.declare_parameter('function_type', 'ackley')
@@ -42,27 +42,22 @@ class CentralizedDecision(Node):
 
         self.func = function_dict[self.get_parameter('function_type').value].function
 
-        all_robots_namespaces = set(['MobileSensor1'])
-
-        self.robot_listeners = {namespace:robot_listener(self,namespace,self.pose_type_string)\
-						 for namespace in all_robots_namespaces}
+        self.robot_listeners = {namespace:robot_listener(self, namespace, self.pose_type_string)\
+						 for namespace in all_robot_namespace}
         
-        self.obs = [None for i in range(len(all_robots_namespaces)-1)]
+        self.obs = [None for i in range(len(all_robot_namespace)-1)]
 
-        self.queries_publisher_ = self.create_publisher(Float32MultiArray, 'queries', 10)
+        self.queries_publisher_ = self.create_publisher(Float32MultiArray, '/bo_central/queries', 10)
 
         self.update_obs_time = 1.
-        self.create_timer(self.update_obs_time, self.update_obs_callback)
-
-        self.all_obs_received_publisher = self.create_publisher(Bool, '/bo_central/all_obs_received')
-        self.all_obs_received_msg = Bool()
-        self.all_obs_received_msg.data = False
-        
+        self.create_timer(self.update_obs_time, self.update_obs_callback)        
         
         if function_dict.get(algo_args.objective).arg_min is not None:
             arg_max = function_dict.get(algo_args.objective).arg_min
         else:
             arg_max = None
+
+        algo_args.n_workers = len(all_robot_namespace)
 
         N = np.ones([algo_args.n_workers, algo_args.n_workers])
 
@@ -84,33 +79,33 @@ class CentralizedDecision(Node):
                                                                             args=algo_args)
 
     def update_obs_callback(self):
-        targets_reached = [listener.is_target_reached() for _, listener in self.robot_listeners.items()]
+        # targets_reached = [listener.is_target_reached() for _, listener in self.robot_listeners.items()]
+        location = [listener.get_latest_loc() for _, listener in self.robot_listeners.items()]
         obs = [listener.get_observed_values() for _, listener in self.robot_listeners.items()]
-        self.get_logger().info(str(targets_reached))
+        # self.get_logger().info(str(targets_reached))
         self.get_logger().info(str(obs))
-        if any(targets_reached) and any(obs) and (not self.all_obs_received_msg.data):
-            self.all_obs_received_msg.data = True
-            self.all_obs_received_publisher.publish(self.all_obs_received_msg)
+        if all(obs):
             # if self.sim:
             #     self.obs = [listener.get_latest_readings() for _, listener in self.robot_listeners.items()]
             # else:
             #     self.obs = []
             # self.obs = [listener.get_observed_values() for _, listener in self.robot_listeners.items()]
-            self.next_queries = self.bayesian_optimization_model.optimize(obs) # TODO: add projected gradient descent here?
+            self.next_queries = self.bayesian_optimization_model.optimize(obs)
             msg = Float32MultiArray()
-            msg.data = list(self.next_queries)
-            self.queries_publisher_.pub(self.next_queries)
+            flattern_q = self.next_queries.reshape([-1]).tolist()
+            msg.data = flattern_q
+            self.queries_publisher_.publish(msg)
+
             time.sleep(1.0) # wait the msg sent to robot nodes
-            self.all_obs_received_msg.data = False
-            self.all_obs_received_publisher.publish(self.all_obs_received_msg)
         else:
             pass
 
 def main(args=sys.argv):
     rclpy.init(args=args)
     pose_type = args[1]
+    all_robots_namespace = args[2].split(',')
 
-    centralized_decision = CentralizedDecision(pose_type)
+    centralized_decision = CentralizedDecision(pose_type, all_robots_namespace)
 
     rclpy.spin(centralized_decision)
 

@@ -28,11 +28,11 @@ def generate_launch_description():
     # t_y = [0]
     # t_Yaw = [0]
 
-    sensor_names = ['MobileSensor{}'.format(i + 1) for i in range(1)]
+    sensor_names = ['MobileSensor{}'.format(i + 1) for i in range(2)]
 
     # Initial position and orientation of sensors
-    x = [0.]
-    y=[0.]
+    x = [0., 1.]
+    y=[0., 1.]
     Yaw = [0,0,0,0]
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='True')

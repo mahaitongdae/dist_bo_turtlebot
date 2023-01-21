@@ -2,7 +2,7 @@
     "objective": "ackley",
     "constraint": "disk",
     "model": "torch",
-    "n_workers": 1,
+    "n_workers": 2,
     "kernel": "Matern",
     "acquisition_function": "es",
     "policy": "greedy",

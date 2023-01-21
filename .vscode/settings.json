@@ -6,7 +6,8 @@
         "/home/mht/turtlebot3_ws/install/fim_track_2/lib/python3.8/site-packages",
         "/home/mht/turtlebot3_ws/build/dist_bo",
         "/home/mht/turtlebot3_ws/install/dist_bo/lib/python3.8/site-packages",
-        "/opt/ros/foxy/lib/python3.8/site-packages"
+        "/opt/ros/foxy/lib/python3.8/site-packages",
+        "/home/mht/turtlebot3_ws/src/dist_bo/dist_bo"
     ],
     "python.analysis.extraPaths": [
         "/home/mht/turtlebot3_ws/install/custom_interfaces/lib/python3.8/site-packages",
@@ -14,6 +15,7 @@
         "/home/mht/turtlebot3_ws/build/dist_bo",
         "/home/mht/turtlebot3_ws/install/dist_bo/lib/python3.8/site-packages",
         "/home/mht/turtlebot3_ws/install/dist_bo/lib/python3.8/site-packages",
-        "/opt/ros/foxy/lib/python3.8/site-packages"
+        "/opt/ros/foxy/lib/python3.8/site-packages",
+        "/home/mht/turtlebot3_ws/src/dist_bo/dist_bo"
     ]
 }

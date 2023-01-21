@@ -1030,7 +1030,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
                 pass
         
         # Reset model and data before each run
-        self._next_query = []
+        self._next_query = [np.array([0.0,1.0]), np.array([0.0,2.0])]
         # self.bc_data = [[[] for j in range(self.n_workers)] for i in range(self.n_workers)]
 
         self.X = []
@@ -1061,14 +1061,15 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         
         return
 
-    def _entropy_search_grad(self, a, x, n):
+    def _entropy_search_grad(self, a, x, n, projection=True, radius=1.0):
         """
                 Entropy search acquisition function.
                 Args:
                     a: # agents
                     x: array-like, shape = [n_samples, n_hyperparams]
                     n: agent nums
-                    model:
+                    projection: if project to a close circle
+                    radius: circle of the projected circle
                 """
 
         x = x.reshape(-1, self._dim)
@@ -1082,7 +1083,10 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         amaxucb = x[np.argmax(ucb.clone().detach().numpy())][np.newaxis, :]
         self.amaxucb = amaxucb
         # x = np.vstack([amaxucb for _ in range(self.n_workers)])
-        init_x = np.random.normal(amaxucb, 1.0, (self.n_workers, self.domain.shape[0]))
+        if projection:
+            init_x = self.X[-1 * self.n_workers:]
+        else:
+            init_x = np.random.normal(amaxucb, 1.0, (self.n_workers, self.domain.shape[0])) # randomly initialize x and get to the optimum
 
         x = torch.tensor(init_x, requires_grad=True)
         optimizer = torch.optim.Adam([x], lr=0.1)
@@ -1095,6 +1099,11 @@ class BayesianOptimizationCentralized(bayesian_optimization):
             loss = -torch.matmul(torch.matmul(cov_x_xucb.T, torch.linalg.inv(cov_x_x + 0.01 * torch.eye(len(cov_x_x)))), cov_x_xucb)
             loss.backward()
             optimizer.step()
+            if projection:
+                init_x = torch.tensor(init_x)
+                lenth = torch.norm(x - init_x, dim=1).reshape([-1, 1])
+                x = torch.where((lenth > radius).reshape([-1, 1]), init_x + radius / lenth * (x-init_x), x)
+                x.detach_()                    
         return x.clone().detach().numpy()
 
     def _batch_upper_confidential_bound(self, a, x, n):
@@ -1230,8 +1239,8 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         self.Y = self.Y + obs
 
         # Calculate regret
-        _simple_regret = self._regret(np.max(self.Y_train))
-        self._simple_cumulative_regret = self._regret(np.max(self.Y_train))
+        _simple_regret = self._regret(np.max(self.Y))
+        self._simple_cumulative_regret = self._regret(np.max(self.Y))
         # Calculate distance traveled
         if not self.optimizer_step:
             _distance_traveled = 0
@@ -1240,7 +1249,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
             XinAgent = np.swapaxes(XinAgent, 0, 1)
             _distance_traveled =  sum([np.linalg.norm(XinAgent[a][-2] - XinAgent[a][-1]) for a in range(self.n_workers)])
 
-        data = dict(regret=_simple_regret, distance_traveled=_distance_traveled, step=self.optimizer_step)
+        data = dict(regret=[_simple_regret], distance_traveled=[_distance_traveled])
         df = pd.DataFrame().from_dict(data)
         filepath = os.path.join(self._DATA_DIR_,'data.csv')
         df.to_csv(filepath, mode='a', header=False, index = False)  
@@ -1276,6 +1285,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         # Generate gif
         # if plot and n_runs == 1:
         #     self._generate_gif(n_iters, plot)
+        return self._next_query
 
 
     def _plot_iteration(self, iter, plot_iter):

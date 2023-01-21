@@ -25,7 +25,7 @@ class VirtualSourceByFunc(Node):
     def query_callback(self, request, response):
         loc = (request.x, request.y)
         response.obj = self.func(loc)
-        self.get_logger().info('Incoming request\na: %d b: %d' % (request.x, request.y))
+        self.get_logger().info('Incoming request\na: %.3f b: %.3f' % (request.x, request.y))
         return response
 
 def main(args=None):

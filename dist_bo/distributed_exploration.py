@@ -47,6 +47,10 @@ from motion_control.WaypointTracking import LQR_for_motion_mimicry
 
 from collision_avoidance.obstacle_detector import obstacle_detector, source_contact_detector, boundary_detector
 from collision_avoidance.regions import RegionsIntersection
+from ros2_utils.benchmark_functions_2D import *
+
+function_dict = {'bird':Bird(), 'disk':Disk(), 'ackley': Ackley(), 'rosenbrock': Rosenbrock(),
+                 'eggholder': Eggholder()}
 
 
 COEF_NAMES = ['C1','C0','k','b']
@@ -67,7 +71,7 @@ def get_control_action(waypoints,curr_x):
 	return uhat
 
 class distributed_seeking(Node):
-	def __init__(self, robot_namespace, pose_type_string, neighborhood_namespaces=None, xlims=[-np.inf,np.inf], ylims = [-np.inf,np.inf]):
+	def __init__(self, robot_namespace, pose_type_string, init_target_loc, neighborhood_namespaces=None, xlims=[-np.inf,np.inf], ylims = [-np.inf,np.inf]):
 		super().__init__(node_name = 'distributed_seeking', namespace = robot_namespace)
 		self.pose_type_string = pose_type_string
 		self.robot_namespace = robot_namespace
@@ -82,12 +86,11 @@ class distributed_seeking(Node):
 						 for namespace in neighborhood_namespaces}
 
 		self.id = int(robot_namespace[-1])
-		# State definition
-		self.obs_published = False
 		self.target_reached = False
-		self.target_loc_updated = True
 		self.position_control_step = 1
-		self.central_all_obs_received = False
+		self.main_loop_step = 1
+		self.func = function_dict['ackley'].function
+		
 
 		qos = QoSProfile(depth=10)
 
@@ -98,8 +101,8 @@ class distributed_seeking(Node):
 		# self.waypoint_sleep_time = 0.5
 		# self.waypoint_timer = self.create_timer(self.waypoint_sleep_time,self.simple_waypoint_callback)
 
-		self.motion_sleep_time = 0.1
-		self.motion_timer = self.create_timer(self.motion_sleep_time,self.simple_position_callback)
+		# self.motion_sleep_time = 0.1
+		# self.motion_timer = self.create_timer(self.motion_sleep_time,self.simple_position_callback)
 
 
 		if VISUALIZE:
@@ -115,15 +118,8 @@ class distributed_seeking(Node):
 		# # Temporary hard-coded waypoints used in devel.	
 		self.waypoints = np.array([[1.,-2.5],[2.,-1.5],[3,-0.5]])
 		# # self.waypoints = np.array([[3,-0.5]])
-		self.target_loc = np.array([1.,-2.5])
-
-		# self.F = 0
-
-		# # # FIM consensus handler
-		# # self.FIM = np.ones((2,2))*1e-4
-		# # self.cons = consensus_handler(self,robot_namespace,neighborhood_namespaces,self.FIM,topic_name = 'FIM',qos=qos)
-		
-		self.waypoint_pub = self.create_publisher(Float32MultiArray,'waypoints',qos)
+		self.target_loc = np.array(init_target_loc)
+		self.get_logger().info('Initial target location of {}: ({:.1f}, {:.1f})'.format(robot_namespace, self.target_loc[0], self.target_loc[1]))
 	
 		"""
 		Motion control initializations
@@ -141,7 +137,6 @@ class distributed_seeking(Node):
 		self.obstacle_detector = obstacle_detector(self)
 		self.source_contact_detector = source_contact_detector(self)
 		self.boundary_detector = boundary_detector(self,xlims,ylims)
-
 
 		# If source is foumd by some robot, SOURCE_LOC will be set to not None.
 		# self.check_source_found_sleep_time = 0.1
@@ -165,34 +160,49 @@ class distributed_seeking(Node):
 		# receiving next-query
 		qos = QoSProfile(depth=10)
 		self.create_subscription(Float32MultiArray, '/bo_central/queries', self.new_query_callback, qos)
-		self.create_subscription(Bool, '/bo_central/all_obs_received', )
 
 		# pub observation
 		self.obs = 0.0
 		self.observe_publisher = self.create_publisher(Float32, '/{}/observation'.format(self.robot_namespace), qos)
-		# reach target publisher
-		self.target_reached_publisher = self.create_publisher(Bool, '/{}/target_reached'.format(self.robot_namespace), qos)
-		observation_and_target_time = 0.1
-		self.create_timer(observation_and_target_time, self.publish_obs_callback)
-		self.create_timer(observation_and_target_time, self.publish_target_reached_callback)
-		self.create_timer(observation_and_target_time, self.query_virtual_source_callback)
-
-		# client for query virtual source (will be replaced by sensor reading in real robots)
-		# self.client = self.create_client(Query2DFunc, 'query_2d_func')
 		self.client = self.create_client(Query2DFunc, '/query_2d_func')
 		
 		while not self.client.wait_for_service(timeout_sec=1.0):
 			self.get_logger().info('service not available, waiting again...')
 		self.req = Query2DFunc.Request()
 
+		main_loop_freq = 30
+		self.create_timer(float(1/main_loop_freq), self.main_loop_callback)
+
+	def main_loop_callback(self):
+		'''
+		main loop steps
+		1. move to target
+		2. query source & publish observation
+		3. 
+		'''
+
+		if self.main_loop_step == 1:
+			self.simple_position_callback()
+		
+		elif self.main_loop_step == 2:
+			self.vel_pub.publish(stop_twist())
+			self.send_query()
+			self.publish_obs_callback()
+		
+		elif self.main_loop_step == 3:
+			self.vel_pub.publish(stop_twist())
+
 	def send_query(self):
 		loc = self.get_my_loc()
-		self.req.x = loc[0]
-		self.req.y = loc[1]
-		self.future = self.client.call_async(self.req)
-		rclpy.spin_until_future_complete(self, self.future)
-		response = self.future.result()
-		self.obs = response.obj
+		# self.req.x = float(loc[0])
+		# self.req.y = float(loc[1])
+		# self.future = self.client.call_async(self.req)
+		# rclpy.spin_until_future_complete(self, self.future)
+		self.obs = -1.0 * self.func(loc)
+		self.get_logger().info('Receiced virtual source obs: {:.3f}'.format(self.obs))
+		# response = self.future.result()
+		# self.obs = response.obj
+		
 
 	def query_virtual_source_callback(self):
 		if self.target_reached:
@@ -206,26 +216,25 @@ class distributed_seeking(Node):
 	def publish_obs_callback(self):
 		msg = Float32()
 		msg.data = self.obs
-		if self.target_reached is False:
-			pass
-		else:
-			if self.central_all_obs_received:
-				pass
-			else:
-				self.observe_publisher.publish(msg)
-				self.obs_published = True
+		self.observe_publisher.publish(msg)
+		self.get_logger().info('Obs published!')
+		self.main_loop_step += 1
+				
 
-	def publish_target_reached_callback(self):
-		msg = Bool()
-		msg.data = self.target_reached
-		self.target_reached_publisher.publish(msg)
+	# def publish_target_reached_callback(self):
+	# 	msg = Bool()
+	# 	msg.data = self.target_reached
+	# 	self.target_reached_publisher.publish(msg)
 
 	def new_query_callback(self, data):
-		if self.target_loc_updated is True:
+		if self.main_loop_step != 3:
+			# in the step of obs published
 			pass
 		else:
-			self.target_loc = np.asarray([data.data[2*self.id], data.data[2*self.id+1]])
-			self.target_loc_updated = True
+			self.target_loc = np.asarray([data.data[2*(self.id - 1)], data.data[2*(self.id - 1)+1]])
+			self.get_logger().info('Get new target loc: ({:.3f}, {:.3f})'.format(self.target_loc[0], self.target_loc[1]))
+			self.main_loop_step = 1 # reset main loop to new step
+			self.target_reached = False
 
 
 	def FIRST_FOUND_callback_(self,data):
@@ -521,12 +530,20 @@ class distributed_seeking(Node):
 		twist = Twist()
 		loc = self.get_my_loc()
 		yaw = self.get_my_yaw()
-
+		
 		if (loc is not None) and (yaw is not None):
+			distance = math.sqrt(
+						(self.target_loc[1] - loc[1])**2 +
+						(self.target_loc[0] - loc[0])**2)
+			if distance <= 0.03 and self.position_control_step == 1:
+				self.get_logger().info("initial state reach target")
+				time.sleep(0.5) # in case other nodes are not ready
+				self.position_control_step = 3
+				return
 
 			if self.target_reached is True:
+				self.get_logger().info('Target reached!')
 				self.vel_pub.publish(stop_twist())
-
 			else:
 				# Step 1: Turn
 				if self.position_control_step == 1:
@@ -535,16 +552,13 @@ class distributed_seeking(Node):
 						self.target_loc[0] - loc[0])
 					angle = path_theta - yaw #TODO:check the coord system
 					angular_velocity = 1.0  # unit: rad/s
-					self.get_logger().info('path_theta: {:.3f}, self yaw = {:.3f}'.format(path_theta, yaw))
+					# self.get_logger().info('path_theta: {:.3f}, self yaw = {:.3f}'.format(path_theta, yaw))
 					twist, self.position_control_step = self.controller.turn(angle, angular_velocity, self.position_control_step)
 
 				# Step 2: Go Straight
 				elif self.position_control_step == 2:
-					distance = math.sqrt(
-						(self.target_loc[1] - loc[1])**2 +
-						(self.target_loc[0] - loc[0])**2)
 					linear_velocity = 0.1  # unit: m/s
-					self.get_logger().info('distance: {:.3f}'.format(distance))
+					# self.get_logger().info('distance: {:.3f}'.format(distance))
 					twist, self.position_control_step = self.controller.go_straight(distance, linear_velocity, self.position_control_step)
 
 				# # Step 3: Turn
@@ -558,8 +572,9 @@ class distributed_seeking(Node):
 				elif self.position_control_step == 3:
 					self.position_control_step = 1
 					self.target_reached = True
-					self.target_loc_updated = False
 					self.get_logger().info('Target reached!')
+					self.main_loop_step += 1
+					time.sleep(0.5)
 				self.vel_pub.publish(twist)
 
 
@@ -577,13 +592,11 @@ class distributed_seeking(Node):
 			pass
 
 	def query_source_callback(self, data):
-		if self.target_reached is False:
-			pass
-		else:
-			query_points = data.data
-			self.target_loc = (query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1])
-			self.get_logger().info('Get new source at ({}, {})'.format(query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1]))
-			self.obs_published = False
+		query_points = data.data
+		self.target_loc = (query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1])
+		self.get_logger().info('Get new source at ({}, {})'.format(query_points[2 * (self.robot_id-1), 2 * (self.robot_id-1) + 1]))
+		self.target_reached = False
+		self.get_logger().info('Reset target reached: {}'.format(str(self.target_reached)))
 
 	def motion_callback(self):
 		"""
@@ -658,8 +671,8 @@ def main(args=sys.argv):
 
 	# Get the robot name passed in by the user
 	robot_namespace='MobileSensor1'
-	# if arguments >= position:
-	# 	robot_namespace = args_without_ros[position]
+	if arguments >= position:
+		robot_namespace = args_without_ros[position]
 	
 	if arguments >= position+1:
 		pose_type_string = args_without_ros[position+1]
@@ -669,8 +682,13 @@ def main(args=sys.argv):
 	if arguments >= position+2:
 		neighborhood = set(args_without_ros[position+2].split(','))
 	else:
-		# neighborhood = set(['MobileSensor{}'.format(n) for n in range(1,5)])
-		neighborhood = set(['MobileSensor1'])
+		neighborhood = set(['MobileSensor{}'.format(n) for n in range(1,5)])
+		# neighborhood = set(['MobileSensor1'])
+	
+	if arguments >= position+3:
+		init_target_position = [float(loc) for loc in args_without_ros[position+2].split(',')]
+	else:
+		init_target_position = [0.0, 1.0 * float(robot_namespace[-1])]
 	
 	
 	qhat_0 = (np.random.rand(2)-0.5)*0.5+np.array([1.5,2])
@@ -687,7 +705,7 @@ def main(args=sys.argv):
 	#             y_max = y_max,
 	#             y_min = y_min)
 
-	de = distributed_seeking(robot_namespace,pose_type_string, neighborhood_namespaces = neighborhood,
+	de = distributed_seeking(robot_namespace,pose_type_string, init_target_position, neighborhood_namespaces = neighborhood,
 							xlims=[x_min-1,x_max+1],
 							ylims=[y_min-1,y_max+1])
 	
