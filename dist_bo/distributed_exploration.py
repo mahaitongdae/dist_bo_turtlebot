@@ -128,7 +128,7 @@ class distributed_seeking(Node):
 		self.MOVE = True
 		self.move_sub = self.create_subscription(Bool,'/MISSION_CONTROL/MOVE',self.MOVE_CALLBACK, qos)
 	
-		self.vel_pub = self.create_publisher(Twist, 'cmd_vel', qos)
+		self.vel_pub = self.create_publisher(Twist, '/{}/cmd_vel'.format(self.robot_namespace), qos)
 
 		self.control_actions = deque([])
 		self.controller = Turtlebot3Path()
@@ -136,7 +136,7 @@ class distributed_seeking(Node):
 		# Obstacles are expected to be circular ones, parametrized by (loc,radius)
 		self.obstacle_detector = obstacle_detector(self)
 		self.source_contact_detector = source_contact_detector(self)
-		self.boundary_detector = boundary_detector(self,xlims,ylims)
+		# self.boundary_detector = boundary_detector(self,xlims,ylims)
 
 		# If source is foumd by some robot, SOURCE_LOC will be set to not None.
 		# self.check_source_found_sleep_time = 0.1
@@ -159,12 +159,14 @@ class distributed_seeking(Node):
 
 		# receiving next-query
 		qos = QoSProfile(depth=10)
-		self.create_subscription(Float32MultiArray, '/bo_central/queries', self.new_query_callback, qos)
+		self.create_subscription(Float32MultiArray, '/{}/new_queries'.format(robot_namespace), self.new_query_callback, qos)
+		# self.create_subscription(Float32MultiArray, '/new_queries'.format(robot_namespace), self.new_query_callback, qos)
 
 		# pub observation
 		self.obs = 0.0
 		self.observe_publisher = self.create_publisher(Float32, '/{}/observation'.format(self.robot_namespace), qos)
 		self.client = self.create_client(Query2DFunc, '/query_2d_func')
+		self.target_reached_publisher = self.create_publisher(Bool, '/{}/target_reached'.format(self.robot_namespace), qos)
 		
 		while not self.client.wait_for_service(timeout_sec=1.0):
 			self.get_logger().info('service not available, waiting again...')
@@ -180,7 +182,7 @@ class distributed_seeking(Node):
 		2. query source & publish observation
 		3. 
 		'''
-
+		
 		if self.main_loop_step == 1:
 			self.simple_position_callback()
 		
@@ -191,6 +193,10 @@ class distributed_seeking(Node):
 		
 		elif self.main_loop_step == 3:
 			self.vel_pub.publish(stop_twist())
+		
+		msg = Bool()
+		msg.data = self.target_reached
+		self.target_reached_publisher.publish(msg)
 
 	def send_query(self):
 		loc = self.get_my_loc()
@@ -214,11 +220,15 @@ class distributed_seeking(Node):
 		self.central_all_obs_received = msg.data
 
 	def publish_obs_callback(self):
-		msg = Float32()
-		msg.data = self.obs
-		self.observe_publisher.publish(msg)
-		self.get_logger().info('Obs published!')
-		self.main_loop_step += 1
+		self.get_logger().info('subscriber number {}'.format(self.observe_publisher.get_subscription_count()))
+		if self.observe_publisher.get_subscription_count():
+			msg = Float32()
+			msg.data = self.obs
+			self.observe_publisher.publish(msg)
+			self.get_logger().info('Obs published!')
+			self.main_loop_step += 1
+		else:
+			pass
 				
 
 	# def publish_target_reached_callback(self):
@@ -231,8 +241,14 @@ class distributed_seeking(Node):
 			# in the step of obs published
 			pass
 		else:
-			self.target_loc = np.asarray([data.data[2*(self.id - 1)], data.data[2*(self.id - 1)+1]])
-			self.get_logger().info('Get new target loc: ({:.3f}, {:.3f})'.format(self.target_loc[0], self.target_loc[1]))
+			other_target_locs = []
+			neighborhood_namespaces = self.neighborhood_namespaces.copy()
+			neighborhood_namespaces.remove(self.robot_namespace)
+			for rbt_namespace in neighborhood_namespaces:
+				other_target_locs.append(self.robot_listeners[rbt_namespace].get_new_queries())
+			free_space = RegionsIntersection(self.obstacle_detector.get_free_spaces(origins=other_target_locs))
+			self.target_loc = free_space.project_point(np.asarray([data.data[0], data.data[1]])).squeeze()
+			# self.get_logger().info('Get new target loc: ({:.3f}, {:.3f})'.format(self.target_loc[0], self.target_loc[1]))
 			self.main_loop_step = 1 # reset main loop to new step
 			self.target_reached = False
 
@@ -545,12 +561,13 @@ class distributed_seeking(Node):
 				self.get_logger().info('Target reached!')
 				self.vel_pub.publish(stop_twist())
 			else:
-				# Step 1: Turn
-				if self.position_control_step == 1:
-					path_theta = math.atan2(
+				path_theta = math.atan2(
 						self.target_loc[1] - loc[1],
 						self.target_loc[0] - loc[0])
-					angle = path_theta - yaw #TODO:check the coord system
+				angle = path_theta - yaw #TODO:check the coord system in real experiments
+				
+				# Step 1: Turn
+				if self.position_control_step == 1:
 					angular_velocity = 1.0  # unit: rad/s
 					# self.get_logger().info('path_theta: {:.3f}, self yaw = {:.3f}'.format(path_theta, yaw))
 					twist, self.position_control_step = self.controller.turn(angle, angular_velocity, self.position_control_step)
@@ -558,9 +575,10 @@ class distributed_seeking(Node):
 				# Step 2: Go Straight
 				elif self.position_control_step == 2:
 					linear_velocity = 0.1  # unit: m/s
-					# self.get_logger().info('distance: {:.3f}'.format(distance))
-					twist, self.position_control_step = self.controller.go_straight(distance, linear_velocity, self.position_control_step)
-
+					angular_velocity = 0.4  # unit: rad/s
+					
+					twist, self.position_control_step = self.controller.go_straight(distance, angle, linear_velocity, angular_velocity, self.position_control_step)
+					# self.get_logger().info('distance: {:.3f}, angle: {:.3f}, output_turn: {:.3f}'.format(distance, angle, twist.angular.z))
 				# # Step 3: Turn
 				# elif self.step == 3:
 				# 	angle = self.goal_pose_theta - self.last_pose_theta
@@ -680,13 +698,13 @@ def main(args=sys.argv):
 		pose_type_string = prompt_pose_type_string()
 	
 	if arguments >= position+2:
-		neighborhood = set(args_without_ros[position+2].split(','))
+		neighborhood = args_without_ros[position+2].split(',')
 	else:
-		neighborhood = set(['MobileSensor{}'.format(n) for n in range(1,5)])
+		neighborhood = ['MobileSensor{}'.format(n) for n in range(1,5)]
 		# neighborhood = set(['MobileSensor1'])
 	
 	if arguments >= position+3:
-		init_target_position = [float(loc) for loc in args_without_ros[position+2].split(',')]
+		init_target_position = [float(loc) for loc in args_without_ros[position+3].split(',')]
 	else:
 		init_target_position = [0.0, 1.0 * float(robot_namespace[-1])]
 	

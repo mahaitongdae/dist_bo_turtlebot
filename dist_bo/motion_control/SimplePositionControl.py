@@ -19,6 +19,9 @@
 import math
 import time
 FEEDBACK_P = 5.
+FEEDBACK_I = 1.
+FEEDBACK_D = 1.
+CONTROLLER_FREQ = 30
 
 from geometry_msgs.msg import Twist
 
@@ -29,20 +32,22 @@ def simple_truncate(control, upper, lower):
 class Turtlebot3Path(object):
     def __init__(self) -> None:
         self.last_dist = 100.0 # a large value that must be larger than the first distance
-    
-    def turn(self, angle, angular_velocity, step):
+        self._last_angle_error = 0.0
+        self._integral_angle_error = 0.0
+
+    def turn(self, angle_error, angular_velocity, step):
         twist = Twist()
-        if angle <= -math.pi:
-            angle = angle + 2 * math.pi
-        fbk_anglar_vel = simple_truncate(FEEDBACK_P*math.fabs(angle), angular_velocity, 0.1*angular_velocity)
-        if math.fabs(angle) > 0.01:  # 0.01 is small enough value
-            if angle >= math.pi:
+        if angle_error <= -math.pi:
+            angle_error = angle_error + 2 * math.pi
+        fbk_anglar_vel = simple_truncate(FEEDBACK_P*math.fabs(angle_error), angular_velocity, 0.1*angular_velocity)
+        if math.fabs(angle_error) > 0.01:  # 0.01 is small enough value
+            if angle_error >= math.pi:
                 twist.angular.z = -fbk_anglar_vel
-            elif math.pi > angle and angle >= 0:
+            elif math.pi > angle_error and angle_error >= 0:
                 twist.angular.z = fbk_anglar_vel
-            elif 0 > angle and angle >= -math.pi:
+            elif 0 > angle_error and angle_error >= -math.pi:
                 twist.angular.z = -fbk_anglar_vel
-            elif angle > -math.pi:
+            elif angle_error > -math.pi:
                 twist.angular.z = fbk_anglar_vel
         else:
             time.sleep(0.5)
@@ -50,14 +55,20 @@ class Turtlebot3Path(object):
 
         return twist, step
 
-    def go_straight(self, distance, linear_velocity, step):
+    def go_straight(self, distance, angle_error, linear_velocity, angular_velocity, step):
         twist = Twist()
         if distance > 0.03:  # 0.01 is small enough value
             twist.linear.x = simple_truncate(FEEDBACK_P * distance, linear_velocity, 0.5 * linear_velocity)
-            if distance > self.last_dist:
-                step -= 1
-                twist.linear.x = 0.
-                time.sleep(0.5)
+            self._integral_angle_error += angle_error
+            p_out = FEEDBACK_P * angle_error
+            i_out = FEEDBACK_I * self._integral_angle_error
+            d_out = FEEDBACK_D * (angle_error - self._last_angle_error)
+            self._last_angle_error = angle_error
+            twist.angular.z = simple_truncate(p_out+i_out+d_out, angular_velocity, -angular_velocity)
+            # if distance > self.last_dist:
+            #     step -= 1
+            #     twist.linear.x = 0.
+            #     time.sleep(0.5)
         else:
             step += 1
         self.last_dist = distance

@@ -1018,12 +1018,15 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         else:
             print('Supported acquisition functions: ei, ts, es, bucb, ucbpe')
 
-        self._ROOT_DIR_ = 'home/mht/dist_bo_experiment_results'
+        self._ROOT_DIR_ = 'results'
 
-        self._TEMP_DIR_ = os.path.join(os.path.join(self._ROOT_DIR_, "result"), self.args.objective)
+        self._TEMP_DIR_ = os.path.join(self._ROOT_DIR_, self.args.objective)
         self._ID_DIR_ = os.path.join(self._TEMP_DIR_, self._DT_)
         self._DATA_DIR_ = os.path.join(self._ID_DIR_, "data")
-        for path in [self._ROOT_DIR_,self._TEMP_DIR_, self._DATA_DIR_]: #  self._FIG_DIR_, self._PNG_DIR_, self._PDF_DIR_, self._GIF_DIR_
+        self._FIG_DIR_ = os.path.join(self._DATA_DIR_, "figures")
+        self._PNG_DIR_ = os.path.join(self._FIG_DIR_, "png")
+        self._PDF_DIR_ = os.path.join(self._FIG_DIR_, "pdf")
+        for path in [self._ROOT_DIR_,self._TEMP_DIR_, self._DATA_DIR_,self._FIG_DIR_, self._PNG_DIR_,self._PDF_DIR_]: #  self._FIG_DIR_, self._PNG_DIR_, self._PDF_DIR_, self._GIF_DIR_
             try:
                 os.makedirs(path, exist_ok=True)
             except FileExistsError:
@@ -1083,10 +1086,10 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         amaxucb = x[np.argmax(ucb.clone().detach().numpy())][np.newaxis, :]
         self.amaxucb = amaxucb
         # x = np.vstack([amaxucb for _ in range(self.n_workers)])
-        if projection:
-            init_x = self.X[-1 * self.n_workers:]
-        else:
-            init_x = np.random.normal(amaxucb, 1.0, (self.n_workers, self.domain.shape[0])) # randomly initialize x and get to the optimum
+        # if projection:
+        #     init_x = self.X[-1 * self.n_workers:]
+        # else:
+        init_x = np.random.normal(amaxucb, 1.0, (self.n_workers, self.domain.shape[0])) # randomly initialize x and get to the optimum
 
         x = torch.tensor(init_x, requires_grad=True)
         optimizer = torch.optim.Adam([x], lr=0.1)
@@ -1099,7 +1102,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
             loss = -torch.matmul(torch.matmul(cov_x_xucb.T, torch.linalg.inv(cov_x_x + 0.01 * torch.eye(len(cov_x_x)))), cov_x_xucb)
             loss.backward()
             optimizer.step()
-            if projection:
+            if projection and i > int(0.8 * training_iter):
                 init_x = torch.tensor(init_x)
                 lenth = torch.norm(x - init_x, dim=1).reshape([-1, 1])
                 x = torch.where((lenth > radius).reshape([-1, 1]), init_x + radius / lenth * (x-init_x), x)
@@ -1216,7 +1219,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
 
         return x
 
-    def optimize(self, obs, random_search=100, plot = False):
+    def optimize(self, location, obs, random_search=100, plot = False):
         """
         Arguments:
         ----------
@@ -1226,7 +1229,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
             plot: bool or integer
                 If integer, plot iterations with every plot number iteration. If True, plot every interation.
         """
-
+        
         # record step indicator
         self._record_step = False
         if plot:
@@ -1235,7 +1238,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
 
         # parallel/centralized decision
         # obs = [self.objective(q) for q in self._next_query]
-        self.X = self.X + [q for q in self._next_query]
+        self.X = self.X + [q for q in location]
         self.Y = self.Y + obs
 
         # Calculate regret
@@ -1249,10 +1252,27 @@ class BayesianOptimizationCentralized(bayesian_optimization):
             XinAgent = np.swapaxes(XinAgent, 0, 1)
             _distance_traveled =  sum([np.linalg.norm(XinAgent[a][-2] - XinAgent[a][-1]) for a in range(self.n_workers)])
 
+        
+        query_df_col_name = []
+        obs_df_col_name = []
+        for i in range(len(obs)):
+            query_df_col_name = query_df_col_name + ['agent{}_x1'.format(i+1), 'agent{}_x2'.format(i+1)]
+            obs_df_col_name = obs_df_col_name + ['agent{}_obs'.format(i+1)]
+        query_df = pd.DataFrame(np.asarray(location).reshape([1, -1]), columns=query_df_col_name)
+        obs_df = pd.DataFrame(np.asarray(obs).reshape([1, -1]), columns=obs_df_col_name)
         data = dict(regret=[_simple_regret], distance_traveled=[_distance_traveled])
         df = pd.DataFrame().from_dict(data)
         filepath = os.path.join(self._DATA_DIR_,'data.csv')
-        df.to_csv(filepath, mode='a', header=False, index = False)  
+        q_filepath = os.path.join(self._DATA_DIR_,'queries.csv')
+        o_filepath = os.path.join(self._DATA_DIR_,'obs.csv')
+        if self.optimizer_step == 0:
+            df.to_csv(filepath)
+            query_df.to_csv(q_filepath)
+            obs_df.to_csv(o_filepath)
+        else:
+            df.to_csv(filepath, mode='a', header=False)  
+            query_df.to_csv(q_filepath, mode='a', header=False)  
+            obs_df.to_csv(o_filepath, mode='a', header=False)  
 
 
         X = np.array(self.X)
@@ -1268,8 +1288,8 @@ class BayesianOptimizationCentralized(bayesian_optimization):
 
         
         # Plot optimization step
-        # if self._record_step:
-        #     self._plot_iteration(self.optimizer_step, plot)
+        if self._record_step:
+            self._plot_iteration(self.optimizer_step, plot)
 
         # # Compute and plot regret
         # iter, r_mean, r_conf95 = self._mean_regret()
@@ -1285,6 +1305,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         # Generate gif
         # if plot and n_runs == 1:
         #     self._generate_gif(n_iters, plot)
+        self.optimizer_step += 1
         return self._next_query
 
 
@@ -1316,8 +1337,8 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         fmt.set_powerlimits((0,0))
         fmt.useMathText = True
 
-        x = np.array(self.X)
-        y = np.array(self.Y)
+        x = np.array(self.X[self._initial_data_size:])
+        y = np.array(self.Y[self._initial_data_size:])
         # _next_query = np.array(self._next_query).reshape([3, -1])
 
         first_param_grid = np.linspace(self.domain[0,0], self.domain[0,1], self._grid_density)

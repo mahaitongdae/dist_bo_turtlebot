@@ -15,5 +15,5 @@
     "pending_regularization_strength": 0.01,
     "grid_density": 30,
     "n_iters": 150,
-    "n_runs": 5
+    "n_runs": 1
 }

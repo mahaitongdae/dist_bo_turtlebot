@@ -13,11 +13,13 @@ from collections import deque
 
 class robot_listener:
 	''' Robot location and light_reading listener+data container.'''
-	def __init__(self,controller_node,robot_namespace,pose_type_string="",max_record_len=10):
+	def __init__(self,controller_node,robot_namespace,pose_type_string="",max_record_len=10, central=False):
 		"""
 			pose_type_string is one in ["turtlesimPose", "Pose", "Odom", "optitrack"]
 		"""
 		self.robot_name=robot_namespace
+
+		self.is_central = central
 
 		controller_node.get_logger().info('initializing {} listener'.format(robot_namespace))
 		
@@ -28,10 +30,12 @@ class robot_listener:
 		self.coef_topic="/{}/sensor_coefs".format(robot_namespace)
 		self.reach_target_topic="/{}/target_reached".format(robot_namespace)
 		self.observation_topic="/{}/observation".format(robot_namespace)
+		self.new_query_topic="/{}/new_queries".format(robot_namespace)
 		self.robot_pose_stack = deque(maxlen=10)
 		self.observed_values_stack = deque(maxlen=10)
 		self.reach_target_stack = deque(maxlen=10)
 		self.light_readings_stack = deque(maxlen=10)
+		self.new_queries_stack = deque(maxlen=10)
 
 		
 		qos = QoSProfile(depth=10)
@@ -40,7 +44,9 @@ class robot_listener:
 		controller_node.create_subscription(Float32MultiArray, self.light_topic, self.light_callback_,qos)
 		controller_node.create_subscription(Float32MultiArray, self.coef_topic,self.coef_callback_,qos)
 		controller_node.create_subscription(Bool, self.reach_target_topic, self.reach_target_callback_,qos)
-		controller_node.create_subscription(Float32, self.observation_topic, self.observed_value_callback,qos)
+		if central:
+			controller_node.create_subscription(Float32, self.observation_topic, self.observed_value_callback,qos)
+		controller_node.create_subscription(Float32MultiArray, self.new_query_topic, self.new_queries_callback,qos)
 	
 		self.coefs = {}
 
@@ -64,8 +70,17 @@ class robot_listener:
 			return None
 		
 	def get_observed_values(self):
-		if len(self.observed_values_stack) > 0:
-			return self.observed_values_stack[-1]
+		if self.is_central:
+			if len(self.observed_values_stack) > 0:
+				return self.observed_values_stack[-1]
+			else:
+				return None
+		else:
+			return None
+	
+	def get_new_queries(self):
+		if len(self.new_queries_stack) > 0:
+			return self.new_queries_stack[-1]
 		else:
 			return None
 
@@ -96,5 +111,12 @@ class robot_listener:
 
 	def observed_value_callback(self, data):
 		self.observed_values_stack.append(data.data)
+	
+	def new_queries_callback(self, data):
+		self.new_queries_stack.append(data.data)
+
+	def reset_obs_target_stacks(self):
+		self.observed_values_stack = deque(maxlen=10)
+		self.reach_target_stack = deque(maxlen=10)
 
 	

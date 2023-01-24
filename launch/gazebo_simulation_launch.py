@@ -13,14 +13,14 @@ TURTLEBOT3_MODEL = os.environ['TURTLEBOT3_MODEL']
 
 def spawn_object_exec(name,filepath,x,y,Yaw):
     return ExecuteProcess(
-            cmd = "ros2 run fim_track_2 spawn_entity\
+            cmd = "ros2 run dist_bo spawn_entity\
              -file {} -entity {} -robot_namespace {} -x {} -y {} -Y {}"\
             .format(filepath,name,name,x,y,Yaw).split(),
             output='screen')
 
 def generate_launch_description():
 
-    # source_names = ["Source{}".format(i) for i in range(1)]
+    source_names = ["Source{}".format(i) for i in range(1)]
     # # Initial position and orientation of moving sources
     # # t_x =[6]
     # # t_y = [6]
@@ -28,11 +28,11 @@ def generate_launch_description():
     # t_y = [0]
     # t_Yaw = [0]
 
-    sensor_names = ['MobileSensor{}'.format(i + 1) for i in range(2)]
+    sensor_names = ['MobileSensor{}'.format(i+1) for i in range(4)]
 
     # Initial position and orientation of sensors
-    x = [0., 1.]
-    y=[0., 1.]
+    x = [2.2, -2.2, 2.2, -2.2]
+    y=[2.2, 2.2, -2.2, -2.2]
     Yaw = [0,0,0,0]
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='True')
@@ -41,9 +41,9 @@ def generate_launch_description():
     moving_source_file = 'source_turtlebot.sdf'
     mobile_sensor_file = 'mobile_sensor.sdf'
 
-    world = os.path.join(get_package_share_directory('fim_track_2'), 'worlds', world_file_name)
-    moving_source_path = os.path.join(get_package_share_directory('fim_track_2'), 'models', moving_source_file)
-    mobile_sensor_path = os.path.join(get_package_share_directory('fim_track_2'), 'models', mobile_sensor_file)
+    world = os.path.join(get_package_share_directory('dist_bo'), 'worlds', world_file_name)
+    moving_source_path = os.path.join(get_package_share_directory('dist_bo'), 'models', moving_source_file)
+    mobile_sensor_path = os.path.join(get_package_share_directory('dist_bo'), 'models', mobile_sensor_file)
 
     # launch_file_dir = os.path.join(get_package_share_directory('turtlebot3_gazebo'), 'launch')
 
@@ -67,11 +67,11 @@ def generate_launch_description():
 
       
     # execs = []
-    # execs.append(Node(package = 'fim_track_2',
-    #             executable = 'virtual_sensor',
-    #             arguments = ['Odom',','.join(sensor_names),','.join(source_names)]
-    #             ))
-    execs.extend([Node(package='fim_track_2',executable='virtual_coef',arguments=[name]) for name in sensor_names])
+    execs.append(Node(package = 'dist_bo',
+                executable = 'virtual_sensor',
+                arguments = ['Odom',','.join(sensor_names),','.join(source_names)]
+                ))
+    # execs.extend([Node(package='fim_track_2',executable='virtual_coef',arguments=[name]) for name in sensor_names])
 
   
 
