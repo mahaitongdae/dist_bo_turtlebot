@@ -9,8 +9,7 @@
 
   <depend>rclpy</depend>
   <depend>example_interfaces</depend>
-  <depend>gpytorch</depend>
-  <depend>tqdm</depend>
+
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
@@ -19,6 +18,8 @@
 
   <exec_depend>python3-networkx</exec_depend>
   <exec_depend>python3-sklearn</exec_depend>
+  <exec_depend>python3-tqdm</exec_depend> 
+  <exec_depend>python3-gpytorch</exec_depend>
   <exec_depend>turtlesim</exec_depend>
 
   <export>

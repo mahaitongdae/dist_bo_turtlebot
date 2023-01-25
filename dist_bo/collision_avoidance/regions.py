@@ -1,4 +1,21 @@
 import numpy as np
+import math
+
+def simple_region(theta, direction = 'clockwise'):
+    region = [[theta, theta + math.pi]] if direction == 'counterclockwise' else [[theta - math.pi, theta]]
+    if region[0][0] < - math.pi:
+        region = [[- math.pi, region[0][1]], [region[0][0] + 2 * math.pi, math.pi]]
+    elif region[0][1] > math.pi:    
+        region = [[region[0][0], math.pi], [- math.pi, region[0][1] - 2 * math.pi]]
+
+    return region
+
+def is_in_simple_region(theta, simple_region):
+    in_ = False
+    for region in simple_region:
+        if (theta >= region[0]) and (theta <= region[1]):
+            in_ = True
+    return in_
 
 class Region:
     """A Region must define a point_project method, which takes in a point and return its projected point."""
@@ -6,6 +23,14 @@ class Region:
         pass
     def point_project(self,pt):
         print('point_project is not defined')
+        return None
+    
+    def point_project_sideway(self, my_loc, pt):
+        print('point_project_sideway is not defined')
+        return None
+    
+    def is_inside(self, pt):
+        print('is_inside is not defined')
         return None
 
 class RegionsIntersection(Region):
@@ -17,6 +42,29 @@ class RegionsIntersection(Region):
         for rg in self.regions:
             pt = rg.project_point(pt)
         return pt
+    
+    def project_point_sideway(self, pt, my_loc):
+        other_theta = []
+        current_pt = pt.copy()
+        theta = None
+        for i, rg in enumerate(self.regions):
+            if rg.is_inside(current_pt):
+                current_pt = rg.point_project_sideway(my_loc)
+                theta = math.atan2(rg.origin[1] - my_loc[1], rg.origin[0] - my_loc[0])
+                break
+        if theta is None:
+            return current_pt
+        else:
+            theta_region = simple_region(theta)
+            for i, rg in enumerate(self.regions):
+                theta = math.atan2(rg.origin[1] - my_loc[1], rg.origin[0] - my_loc[0])
+                if not is_in_simple_region(theta, theta_region):
+                    continue
+                if not rg.is_inside(current_pt):
+                    continue
+                else:
+                    current_pt = rg.point_project_sideway(my_loc)
+            return current_pt            
 
 
 class Rect2D(Region):
@@ -93,4 +141,23 @@ class CircleExterior(Region):
             + (dist==0).reshape(-1,1)*random_proj()
         
         return proj
+    
+    def point_project_sideway(self, my_loc, direction='clockwise'):
+        my_proj = self.project_point(np.atleast_2d(my_loc)).squeeze()
+        angle = math.atan2(my_proj[1] - self.origin[1], my_proj[0] - self.origin[0])
+        if direction == 'clockwise':
+            angle += 1/2 * math.pi
+        else:
+            angle -= 1/2 * math.pi
+        
+        proj = [self.origin[0] + self.radius * np.cos(angle), self.origin[1] + self.radius * np.sin(angle)]
+
+        return proj
+
+    def is_inside(self, pt):
+        return np.linalg.norm(pt - self.origin) < self.radius
+
+    
+
+
 

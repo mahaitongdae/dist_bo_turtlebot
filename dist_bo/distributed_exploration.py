@@ -45,7 +45,7 @@ from ros2_utils.pose import bounded_change_update, turtlebot_twist, stop_twist
 from motion_control.WaypointTracking import LQR_for_motion_mimicry
 
 from collision_avoidance.obstacle_detector import obstacle_detector, source_contact_detector, boundary_detector
-from collision_avoidance.regions import RegionsIntersection
+from collision_avoidance.regions import RegionsIntersection, CircleInterior
 from ros2_utils.benchmark_functions_2D import *
 
 function_dict = {'bird':Bird(), 'disk':Disk(), 'ackley': Ackley(), 'rosenbrock': Rosenbrock(),
@@ -132,6 +132,7 @@ class distributed_seeking(Node):
 		self.waypoints = np.array([[1.,-2.5],[2.,-1.5],[3,-0.5]])
 		# # self.waypoints = np.array([[3,-0.5]])
 		self.target_loc = np.array(init_target_loc)
+		self.look_ahead_target_loc = self.target_loc.copy()
 		self.get_logger().info('Initial target location of {}: ({:.1f}, {:.1f})'.format(robot_namespace, self.target_loc[0], self.target_loc[1]))
 	
 		"""
@@ -185,8 +186,10 @@ class distributed_seeking(Node):
 		# 	self.get_logger().info('service not available, waiting again...')
 		# self.req = Query2DFunc.Request()
 
-		main_loop_freq = 30
-		self.create_timer(float(1/main_loop_freq), self.main_loop_callback)
+		self.main_loop_freq = 30
+		self.create_timer(float(1/self.main_loop_freq), self.main_loop_callback)
+
+		self.main_loop_counter = 0
 
 	def main_loop_callback(self):
 		'''
@@ -210,6 +213,8 @@ class distributed_seeking(Node):
 		msg = Bool()
 		msg.data = self.target_reached
 		self.target_reached_publisher.publish(msg)
+		self.main_loop_counter += 1
+		self.main_loop_counter = self.main_loop_counter % self.main_loop_freq
 
 	def send_query(self):
 		loc = self.get_my_loc()
@@ -264,6 +269,18 @@ class distributed_seeking(Node):
 			# self.get_logger().info('Get new target loc: ({:.3f}, {:.3f})'.format(self.target_loc[0], self.target_loc[1]))
 			self.main_loop_step = 1 # reset main loop to new step
 			self.target_reached = False
+
+	def project_target_loc(self, my_loc):
+		look_ahead_dist = 0.3
+		look_ahead_space = CircleInterior(my_loc, look_ahead_dist)
+		self.look_ahead_target_loc = look_ahead_space.project_point(self.target_loc)
+		other_robot_locs = []
+		neighborhood_namespaces = self.neighborhood_namespaces.copy()
+		neighborhood_namespaces.remove(self.robot_namespace)
+		for rbt_namespace in neighborhood_namespaces:
+			other_robot_locs.append(self.robot_listeners[rbt_namespace].get_latest_loc())
+		free_space = RegionsIntersection(self.obstacle_detector.get_free_spaces(origins=other_robot_locs))
+		self.look_ahead_target_loc = free_space.project_point_sideway(self.look_ahead_target_loc, my_loc)
 
 
 	def FIRST_FOUND_callback_(self,data):
@@ -589,8 +606,22 @@ class distributed_seeking(Node):
 				elif self.position_control_step == 2:
 					linear_velocity = 0.1  # unit: m/s
 					angular_velocity = 0.4  # unit: rad/s
-					
-					twist, self.position_control_step = self.controller.go_straight(distance, angle, linear_velocity, angular_velocity, self.position_control_step)
+
+					self.project_target_loc(loc)
+					if self.id == 1:
+						self.get_logger().info('target loc: {}'.format(self.target_loc))
+						self.get_logger().info('look ahead loc: {}'.format(self.look_ahead_target_loc))
+					distance = math.sqrt(
+						(self.look_ahead_target_loc[1] - loc[1])**2 +
+						(self.look_ahead_target_loc[0] - loc[0])**2)
+					path_theta = math.atan2(
+						self.look_ahead_target_loc[1] - loc[1],
+						self.look_ahead_target_loc[0] - loc[0])
+					if path_theta > 0.5 * math.pi:
+						twist = stop_twist()
+						self.position_control_step = 1
+					else:
+						twist, self.position_control_step = self.controller.go_straight(distance, angle, linear_velocity, angular_velocity, self.position_control_step)
 					# self.get_logger().info('distance: {:.3f}, angle: {:.3f}, output_turn: {:.3f}'.format(distance, angle, twist.angular.z))
 				# # Step 3: Turn
 				# elif self.step == 3:

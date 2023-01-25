@@ -63,6 +63,7 @@ class Turtlebot3Path(object):
             p_out = FEEDBACK_P * angle_error
             i_out = FEEDBACK_I * self._integral_angle_error
             d_out = FEEDBACK_D * (angle_error - self._last_angle_error)
+            print(p_out, i_out, d_out)
             self._last_angle_error = angle_error
             twist.angular.z = simple_truncate(p_out+i_out+d_out, angular_velocity, -angular_velocity)
             # if distance > self.last_dist:
