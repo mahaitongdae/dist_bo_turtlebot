@@ -34,9 +34,9 @@ def generate_launch_description():
 	# 			arguments = [name,'Odom']
 	# 			) for name in mobile_sensors ])
 
-	execs.extend([Node(package = 'dist_bo',
-			executable = 'virtual_source',
-			arguments = [])])
+	# execs.extend([Node(package = 'dist_bo',
+	# 		executable = 'virtual_source',
+	# 		arguments = [])])
 
 	execs.extend([Node(package = 'dist_bo',
 			executable = 'centralized_decision',

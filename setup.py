@@ -32,7 +32,6 @@ setup(
         'console_scripts': [
             'distributed_exploration = dist_bo.distributed_exploration:main',
             'visualize = dist_bo.visualization:main',
-            'virtual_source = dist_bo.virtual_source_func:main',
             'virtual_sensor = dist_bo.virtual_sensor:main',
             'centralized_decision = dist_bo.centralized_decision:main',
             'client = dist_bo.client_member_function:main',

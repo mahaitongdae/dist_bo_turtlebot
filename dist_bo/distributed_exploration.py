@@ -16,7 +16,7 @@ import rclpy
 from rclpy.qos import QoSProfile
 from rclpy.node import Node
 
-from custom_interfaces.srv import Query2DFunc
+# from custom_interfaces.srv import Query2DFunc
 import math
 
 tools_root = os.path.join(os.path.dirname(__file__))
@@ -178,12 +178,12 @@ class distributed_seeking(Node):
 		# pub observation
 		self.obs = 0.0
 		self.observe_publisher = self.create_publisher(Float32, '/{}/observation'.format(self.robot_namespace), qos)
-		self.client = self.create_client(Query2DFunc, '/query_2d_func')
+		# self.client = self.create_client(Query2DFunc, '/query_2d_func')
 		self.target_reached_publisher = self.create_publisher(Bool, '/{}/target_reached'.format(self.robot_namespace), qos)
 		
-		while not self.client.wait_for_service(timeout_sec=1.0):
-			self.get_logger().info('service not available, waiting again...')
-		self.req = Query2DFunc.Request()
+		# while not self.client.wait_for_service(timeout_sec=1.0):
+		# 	self.get_logger().info('service not available, waiting again...')
+		# self.req = Query2DFunc.Request()
 
 		main_loop_freq = 30
 		self.create_timer(float(1/main_loop_freq), self.main_loop_callback)
