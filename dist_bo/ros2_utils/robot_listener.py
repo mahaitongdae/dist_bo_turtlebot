@@ -88,7 +88,7 @@ class robot_listener:
 		else:
 			return None
 	
-	def get_new_cmd_vel(self):
+	def get_latest_cmd_vel(self):
 		if len(self.cmd_vel_stack) > 0:
 			return self.cmd_vel_stack[-1]
 		else:
