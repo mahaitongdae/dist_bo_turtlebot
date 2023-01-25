@@ -5,6 +5,7 @@ from rclpy.qos import QoSProfile
 from rcl_interfaces.srv import GetParameters
 
 from std_msgs.msg import Float32MultiArray,Float32,Bool
+from geometry_msgs.msg import Twist
 
 from ros2_utils.pose import get_pose_type_and_topic,toxy,toyaw
 
@@ -31,11 +32,13 @@ class robot_listener:
 		self.reach_target_topic="/{}/target_reached".format(robot_namespace)
 		self.observation_topic="/{}/observation".format(robot_namespace)
 		self.new_query_topic="/{}/new_queries".format(robot_namespace)
+		self.cmd_vel_topic="/{}/cmd_vel".format(robot_namespace)
 		self.robot_pose_stack = deque(maxlen=10)
 		self.observed_values_stack = deque(maxlen=10)
 		self.reach_target_stack = deque(maxlen=10)
 		self.light_readings_stack = deque(maxlen=10)
 		self.new_queries_stack = deque(maxlen=10)
+		self.cmd_vel_stack = deque(maxlen=10)
 
 		
 		qos = QoSProfile(depth=10)
@@ -47,6 +50,7 @@ class robot_listener:
 		if central:
 			controller_node.create_subscription(Float32, self.observation_topic, self.observed_value_callback,qos)
 		controller_node.create_subscription(Float32MultiArray, self.new_query_topic, self.new_queries_callback,qos)
+		controller_node.create_subscription(Twist, self.cmd_vel_topic, self.cmd_vel_callback,qos)
 	
 		self.coefs = {}
 
@@ -81,6 +85,12 @@ class robot_listener:
 	def get_new_queries(self):
 		if len(self.new_queries_stack) > 0:
 			return self.new_queries_stack[-1]
+		else:
+			return None
+	
+	def get_new_cmd_vel(self):
+		if len(self.cmd_vel_stack) > 0:
+			return self.cmd_vel_stack[-1]
 		else:
 			return None
 
@@ -118,5 +128,8 @@ class robot_listener:
 	def reset_obs_target_stacks(self):
 		self.observed_values_stack = deque(maxlen=10)
 		self.reach_target_stack = deque(maxlen=10)
+
+	def cmd_vel_callback(self, data):
+		self.cmd_vel_stack.append((data.linear.x, data.angular.z))
 
 	

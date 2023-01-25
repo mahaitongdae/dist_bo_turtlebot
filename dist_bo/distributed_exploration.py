@@ -15,7 +15,6 @@ from std_msgs.msg import Float32MultiArray,Bool,String,Float32
 import rclpy
 from rclpy.qos import QoSProfile
 from rclpy.node import Node
-from example_interfaces.srv import AddTwoInts
 
 from custom_interfaces.srv import Query2DFunc
 import math
@@ -70,6 +69,16 @@ def get_control_action(waypoints,curr_x):
 
 	return uhat
 
+def truncate_angle(angle):
+	while True:
+		if angle > math.pi:
+			angle = angle - 2 * math.pi
+		elif angle < - math.pi:
+			angle = angle + 2 * math.pi
+		else:
+			break
+	return angle
+
 class distributed_seeking(Node):
 	def __init__(self, robot_namespace, pose_type_string, init_target_loc, neighborhood_namespaces=None, xlims=[-np.inf,np.inf], ylims = [-np.inf,np.inf]):
 		super().__init__(node_name = 'distributed_seeking', namespace = robot_namespace)
@@ -86,6 +95,10 @@ class distributed_seeking(Node):
 						 for namespace in neighborhood_namespaces}
 
 		self.id = int(robot_namespace[-1])
+		if self.id > 1:
+			self.collsion_avoidance_neighbors = ['MobileSensor{}'.format(i + 1) for i in range(self.id - 1)]
+		else:
+			self.collsion_avoidance_neighbors = None
 		self.target_reached = False
 		self.position_control_step = 1
 		self.main_loop_step = 1
@@ -675,6 +688,32 @@ class distributed_seeking(Node):
 		else:
 			self.vel_pub.publish(stop_twist())
 			self.motion_reset()
+
+	# def action_projection(self, linear_velocity):
+	# 	rotational_velocity = 0.5
+	# 	if self.collsion_avoidance_neighbors is not None:
+	# 		for robot_namespace in self.collsion_avoidance_neighbors:
+	# 			my_loc = self.get_my_loc()
+	# 			my_yaw = self.get_my_yaw()
+	# 			neighbor_loc = self.robot_listeners[robot_namespace].get_latest_loc()
+	# 			neighbor_yaw = self.robot_listeners[robot_namespace].get_latest_yaw()
+	# 			neighbor_cmd_vel = self.robot_listeners[robot_namespace].get_latest_cmd_vel()
+	# 			(neighbor_linear, neighbor_angular) = neighbor_cmd_vel
+	# 			dist_direction_for_me = math.atan2(
+	# 					neighbor_loc[1] - my_loc[1],
+	# 					neighbor_loc[0] - my_loc[0])
+	# 			distance = math.sqrt(
+	# 					(neighbor_loc[1] - my_loc[1])**2 +
+	# 					(neighbor_loc[0] - my_loc[0])**2)
+	# 			dist_direction_for_neighbor = dist_direction_for_me + math.pi
+	# 			dot_d = linear_velocity * math.cos(my_yaw - dist_direction_for_me)
+	# 			if dot_d <= -1 * self.alpha_for_collision_avoidance * distance:
+	# 				return np.sign()
+	# 			else:
+	# 				return 0.0
+				
+
+
 
 
 

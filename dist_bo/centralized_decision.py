@@ -17,6 +17,7 @@ from std_msgs.msg import Float32MultiArray,Bool,String
 import rclpy
 from rclpy.qos import QoSProfile
 from rclpy.node import Node
+from itertools import permutations
 
 tools_root = os.path.join(os.path.dirname(__file__))
 sys.path.insert(0, os.path.abspath(tools_root))
@@ -98,8 +99,18 @@ class CentralizedDecision(Node):
             # self.obs = [listener.get_observed_values() for _, listener in self.robot_listeners.items()]
             self.next_queries = self.bayesian_optimization_model.optimize(location, obs, plot=5)
             msg = Float32MultiArray()
+            # assign queries to each agents
+            dist = 100
+            assigned_seq = []
+            for sequence in permutations([0,1,2]):
+                next_query = np.array([self.next_queries[sequence[0]], self.next_queries[sequence[1]], self.next_queries[sequence[2]]])
+                dist = np.linalg.norm(np.asarray(location) - next_query, axis=1).sum()
+                if dist <= dist:
+                    dist = dist.copy()
+                    assigned_seq = sequence
+            self.get_logger().info('set assign queries sequence: {}'.format(assigned_seq))
             for i, publisher in enumerate(self.queries_publishers_):  
-                flattern_q = self.next_queries[i].tolist()
+                flattern_q = self.next_queries[assigned_seq[i]].tolist()
                 msg.data = flattern_q
                 publisher.publish(msg)
             # msg.data = self.next_queries.reshape([-1]).tolist()
