@@ -33,7 +33,7 @@ function_dict = {'bird':Bird(), 'disk':Disk(), 'ackley': Ackley(), 'rosenbrock':
 
 class CentralizedDecision(Node):
 
-    def __init__(self, pose_type_string, all_robot_namespace):
+    def __init__(self, pose_type_string, all_robot_namespace, sim=False):
         super().__init__('bo_central')
         self.pose_type_string = pose_type_string
         self.robot_listeners = {namespace:robot_listener(self, namespace, self.pose_type_string, central=True)\
@@ -64,7 +64,8 @@ class CentralizedDecision(Node):
 
         N = np.ones([algo_args.n_workers, algo_args.n_workers])
 
-        self.bayesian_optimization_model = BayesianOptimizationCentralized(objective=function_dict.get(algo_args.objective),
+        if sim:
+            self.bayesian_optimization_model = BayesianOptimizationCentralized(objective=function_dict.get(algo_args.objective),
                                                                             domain=function_dict.get(algo_args.objective).domain,
                                                                             arg_max=arg_max,
                                                                             n_workers=algo_args.n_workers,
@@ -79,7 +80,27 @@ class CentralizedDecision(Node):
                                                                             pending_regularization=algo_args.pending_regularization,
                                                                             pending_regularization_strength=algo_args.pending_regularization_strength,
                                                                             grid_density=algo_args.grid_density,
+                                                                            sim = True,
                                                                             args=algo_args)
+        else:
+            self.bayesian_optimization_model = BayesianOptimizationCentralized(objective=function_dict.get(algo_args.objective),
+                                                                            domain=np.array([[-3, 0], [-4, 0]]),
+                                                                            arg_max=None,
+                                                                            n_workers=algo_args.n_workers,
+                                                                            network=N,
+                                                                            kernel='Matern',
+                                                                            # length_scale_bounds=(1, 1000.0)
+                                                                            acquisition_function=algo_args.acquisition_function,
+                                                                            policy=algo_args.policy,
+                                                                            fantasies=algo_args.fantasies,
+                                                                            regularization=algo_args.regularization,
+                                                                            regularization_strength=algo_args.regularization_strength,
+                                                                            pending_regularization=algo_args.pending_regularization,
+                                                                            pending_regularization_strength=algo_args.pending_regularization_strength,
+                                                                            grid_density=algo_args.grid_density,
+                                                                            sim = False,
+                                                                            args=algo_args)
+        
         
         self.update_in_progress = False
 
@@ -100,13 +121,14 @@ class CentralizedDecision(Node):
             self.next_queries = self.bayesian_optimization_model.optimize(location, obs, plot=5)
             msg = Float32MultiArray()
             # assign queries to each agents
-            dist = 100
+            lowest_dist = 100
             assigned_seq = []
-            for sequence in permutations([0,1,2]):
-                next_query = np.array([self.next_queries[sequence[0]], self.next_queries[sequence[1]], self.next_queries[sequence[2]]])
+            self.get_logger().info('generate queries: {}'.format(self.next_queries))
+            for sequence in permutations([i for i in range(len(self.robot_listeners.keys()))]):
+                next_query = np.array([self.next_queries[index] for index in sequence])
                 dist = np.linalg.norm(np.asarray(location) - next_query, axis=1).sum()
-                if dist <= dist:
-                    dist = dist.copy()
+                if dist <= lowest_dist:
+                    lowest_dist = dist.copy()
                     assigned_seq = sequence
             self.get_logger().info('set assign queries sequence: {}'.format(assigned_seq))
             for i, publisher in enumerate(self.queries_publishers_):  

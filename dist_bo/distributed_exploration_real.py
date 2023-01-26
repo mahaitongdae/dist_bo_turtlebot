@@ -149,7 +149,7 @@ class distributed_seeking(Node):
 		# Obstacles are expected to be circular ones, parametrized by (loc,radius)
 		self.obstacle_detector = obstacle_detector(self)
 		self.source_contact_detector = source_contact_detector(self)
-		# self.boundary_detector = boundary_detector(self,xlims,ylims)
+		self.boundary_detector = boundary_detector(self,xlims,ylims)
 
 		# If source is foumd by some robot, SOURCE_LOC will be set to not None.
 		# self.check_source_found_sleep_time = 0.1
@@ -217,8 +217,8 @@ class distributed_seeking(Node):
 		# self.req.y = float(loc[1])
 		# self.future = self.client.call_async(self.req)
 		# rclpy.spin_until_future_complete(self, self.future)
-		self.obs = -1.0 * self.func(loc)
-		self.get_logger().info('Receiced virtual source obs: {:.3f}'.format(self.obs))
+		self.obs = max(self.robot_listeners[self.robot_namespace].get_latest_readings())
+		self.get_logger().info('Receiced readings: {:.3f}'.format(self.obs))
 		# response = self.future.result()
 		# self.obs = response.obj
 		
@@ -259,7 +259,7 @@ class distributed_seeking(Node):
 			neighborhood_namespaces.remove(self.robot_namespace)
 			for rbt_namespace in neighborhood_namespaces:
 				other_target_locs.append(self.robot_listeners[rbt_namespace].get_new_queries())
-			free_space = RegionsIntersection(self.obstacle_detector.get_free_spaces(origins=other_target_locs))
+			free_space = RegionsIntersection(self.obstacle_detector.get_free_spaces(origins=other_target_locs) + + self.boundary_detector.get_free_spaces())
 			self.target_loc = free_space.project_point(np.asarray([data.data[0], data.data[1]])).squeeze()
 			self.get_logger().info('Get new target loc: ({:.3f}, {:.3f})'.format(self.target_loc[0], self.target_loc[1]))
 			self.main_loop_step = 1 # reset main loop to new step
@@ -582,7 +582,7 @@ class distributed_seeking(Node):
 				# Step 1: Turn
 				if self.position_control_step == 1:
 					angular_velocity = 1.0  # unit: rad/s
-					# self.get_logger().info('path_theta: {:.3f}, self yaw = {:.3f}'.format(path_theta, yaw))
+					self.get_logger().info('path_theta: {:.3f}, self yaw = {:.3f}'.format(path_theta, yaw))
 					twist, self.position_control_step = self.controller.turn(angle, angular_velocity, self.position_control_step)
 
 				# Step 2: Go Straight
@@ -594,7 +594,7 @@ class distributed_seeking(Node):
 					else:
 						twist = stop_twist()
 						self.position_control_step = 1
-					# self.get_logger().info('distance: {:.3f}, angle: {:.3f}, output_turn: {:.3f}'.format(distance, angle, twist.angular.z))
+					self.get_logger().info('distance: {:.3f}, angle: {:.3f}, output_turn: {:.3f}'.format(distance, angle, twist.angular.z))
 				# # Step 3: Turn
 				# elif self.step == 3:
 				# 	angle = self.goal_pose_theta - self.last_pose_theta
@@ -748,15 +748,15 @@ def main(args=sys.argv):
 	if arguments >= position+3:
 		init_target_position = [float(loc) for loc in args_without_ros[position+3].split(',')]
 	else:
-		init_target_position = [0.0, -1.0 * float(robot_namespace[-1])]
+		init_target_position = [0.0, 1.0 * float(robot_namespace[-1])]
 	
 	
 	qhat_0 = (np.random.rand(2)-0.5)*0.5+np.array([1.5,2])
 
-	x_max = 3
-	x_min = 0
-	y_max = 4
-	y_min = 0
+	x_max = 0
+	x_min = -3
+	y_max = 0
+	y_min = -4
 	
 	# estimator = ConsensusEKF(qhat_0,R_mag=10,Q_mag = 10,C_gain=0.1,\
 	# 	       # Dimensions about the lab, fixed.

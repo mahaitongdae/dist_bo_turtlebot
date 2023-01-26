@@ -28,7 +28,7 @@ def generate_launch_description():
     # t_y = [0]
     # t_Yaw = [0]
 
-    sensor_names = ['MobileSensor{}'.format(i+1) for i in range(3)]
+    sensor_names = ['MobileSensor{}'.format(i) for i in range(4)]
 
     # Initial position and orientation of sensors
     x = [2.2, -2.2, 2.2, -2.2]
