@@ -55,7 +55,10 @@ class RegionsIntersection(Region):
         if theta is None:
             return current_pt
         else:
-            theta_region = simple_region(theta)
+            theta2 = math.atan2(pt[1] - my_loc[1], pt[0] - my_loc[0])
+            # direction = 'clockwise' if theta2 <= theta else 'counterclockwise'
+            direction = 'clockwise'
+            theta_region = simple_region(theta, direction=direction)
             for i, rg in enumerate(self.regions):
                 theta = math.atan2(rg.origin[1] - my_loc[1], rg.origin[0] - my_loc[0])
                 if not is_in_simple_region(theta, theta_region):
@@ -63,7 +66,7 @@ class RegionsIntersection(Region):
                 if not rg.is_inside(current_pt):
                     continue
                 else:
-                    current_pt = rg.point_project_sideway(my_loc)
+                    current_pt = rg.point_project_sideway(my_loc, direction=direction)
             return current_pt            
 
 

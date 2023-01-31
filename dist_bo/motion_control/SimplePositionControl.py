@@ -19,7 +19,7 @@
 import math
 import time
 FEEDBACK_P = 5.
-FEEDBACK_I = 1.
+FEEDBACK_I = 0.1
 FEEDBACK_D = 1.
 CONTROLLER_FREQ = 30
 

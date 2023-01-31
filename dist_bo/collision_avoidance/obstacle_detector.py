@@ -25,7 +25,7 @@ class obstacle_detector:
 
 	def get_free_spaces(self, origins = None):
 		
-		SAFE_RADIUS = 3*BURGER_RADIUS
+		SAFE_RADIUS = 2.5*BURGER_RADIUS
 		# SAFE_RADIUS = 5*BURGER_RADIUS
 		# SAFE_RADIUS = 6*BURGER_RADIUS
 

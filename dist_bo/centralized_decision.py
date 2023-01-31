@@ -28,6 +28,8 @@ from ros2_utils.benchmark_functions_2D import *
 from ros2_utils.robot_listener import robot_listener
 from std_srvs.srv import Trigger
 
+from visualization import Visulizer
+
 function_dict = {'bird':Bird(), 'disk':Disk(), 'ackley': Ackley(), 'rosenbrock': Rosenbrock(),
                  'eggholder': Eggholder()}
 
@@ -53,7 +55,10 @@ class CentralizedDecision(Node):
         # self.queries_publishers_ = self.create_publisher(Float32MultiArray, '/new_queries', 10)
 
         self.update_obs_time = 1.
-        self.create_timer(self.update_obs_time, self.update_obs_callback)        
+        self.create_timer(self.update_obs_time, self.update_obs_callback) 
+
+        # self.vis_fps = 30
+        # self.create_timer(1 / self.vis_fps, self.update_rbt_locs_callback)          
         
         if function_dict.get(algo_args.objective).arg_min is not None:
             arg_max = function_dict.get(algo_args.objective).arg_min
@@ -82,6 +87,9 @@ class CentralizedDecision(Node):
                                                                             args=algo_args)
         
         self.update_in_progress = False
+        # self.visulizer = Visulizer()
+        # future = self.visulizer.run()
+        # rclpy.spin_until_future_complete(future)
 
     def update_obs_callback(self):
         targets_reached = [listener.is_target_reached() for _, listener in self.robot_listeners.items()]
@@ -100,13 +108,14 @@ class CentralizedDecision(Node):
             self.next_queries = self.bayesian_optimization_model.optimize(location, obs, plot=5)
             msg = Float32MultiArray()
             # assign queries to each agents
-            dist = 100
+            lowest_dist = 100
             assigned_seq = []
-            for sequence in permutations([0,1,2]):
-                next_query = np.array([self.next_queries[sequence[0]], self.next_queries[sequence[1]], self.next_queries[sequence[2]]])
+            self.get_logger().info('generate queries: {}'.format(self.next_queries))
+            for sequence in permutations([i for i in range(len(self.robot_listeners.keys()))]):
+                next_query = np.array([self.next_queries[index] for index in sequence])
                 dist = np.linalg.norm(np.asarray(location) - next_query, axis=1).sum()
-                if dist <= dist:
-                    dist = dist.copy()
+                if dist <= lowest_dist:
+                    lowest_dist = dist.copy()
                     assigned_seq = sequence
             self.get_logger().info('set assign queries sequence: {}'.format(assigned_seq))
             for i, publisher in enumerate(self.queries_publishers_):  
@@ -127,6 +136,12 @@ class CentralizedDecision(Node):
     #     locations = np.array(locations).reshape([-1, 2])
     #     inverted_locations = locations[::1]
     #     norm1 = 
+
+    # def update_rbt_locs_callback(self):
+    #     location = [listener.get_latest_loc() for _, listener in self.robot_listeners.items()]
+    #     self.visulizer.set_robot_loc(location)
+    #     self.get_logger().info('set robot loc')
+
 
 def main(args=sys.argv):
     rclpy.init(args=args)

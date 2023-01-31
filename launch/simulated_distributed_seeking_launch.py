@@ -9,9 +9,9 @@ def neighorhoods(G, mobile_sensors):
 	return {sensor:list(dict(G[sensor]).keys())+[sensor] for sensor in mobile_sensors}
 
 def generate_launch_description():
-	mobile_sensors = ['MobileSensor{}'.format(i+1) for i in range(2)] # 
+	mobile_sensors = ['MobileSensor{}'.format(i+1) for i in range(3)] # 
 
-	G = nx.circulant_graph(len(mobile_sensors), [0,1])
+	G = nx.circulant_graph(len(mobile_sensors), [0,1,2])
 
 	G.remove_edges_from(nx.selfloop_edges(G))
 
@@ -46,13 +46,17 @@ def generate_launch_description():
 	# 		executable = 'visualize',
 	# 		arguments = [])])
 
-	# init_location = ['2.0,2.0', '-2.0,2.0', '2.0,-2.0', '-2.0,-2.0']
-	init_location = ['-2.2,2.2', '2.2,2.2',  '2.0,-2.0', '-2.0,-2.0']
+	init_location = ['2.0,2.0', '-2.0,2.0', '2.0,-2.0', '-2.0,-2.0']
+	# init_location = ['-2.0, 2.0', '2.0,2.0',  '2.0,-2.0', '-2.0,-2.0']
 	
 	execs.extend([Node(package = 'dist_bo',
 			executable = 'distributed_exploration',
 			arguments = [name,'Odom',','.join(sorted(nb[name])), init_location[i]]
 			) for i, name in enumerate(mobile_sensors)])
+	
+	execs.extend([Node(package = 'dist_bo',
+		executable = 'visualize',
+		arguments = ['Odom', ','.join(mobile_sensors)])])
 	
 	
 	return LaunchDescription(execs)

@@ -23,6 +23,8 @@ from sklearn.gaussian_process import kernels, GaussianProcessRegressor
 import torch
 import gpytorch
 
+
+
 import pandas as pd
 
 warnings.filterwarnings("ignore")
@@ -1061,10 +1063,13 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         self.model.train()
 
         self.optimizer_step = 0
+
+        # plt.ion()
+        self.fig, self.ax = plt.subplots(1, 2, figsize=(10,4), sharey=True) # , sharex=True
         
         return
 
-    def _entropy_search_grad(self, a, x, n, projection=True, radius=1.0):
+    def _entropy_search_grad(self, a, x, n, projection=True, radius=0.8):
         """
                 Entropy search acquisition function.
                 Args:
@@ -1093,20 +1098,23 @@ class BayesianOptimizationCentralized(bayesian_optimization):
 
         x = torch.tensor(init_x, requires_grad=True)
         optimizer = torch.optim.Adam([x], lr=0.1)
-        training_iter = 50
+        training_iter = 500
         for i in range(training_iter):
             optimizer.zero_grad()
             joint_x = torch.vstack((x,torch.tensor(amaxucb)))
             cov_x_xucb = self.model.predict(joint_x, return_cov=True, return_tensor=True)[1][-1, :-1].reshape([-1,1])
             cov_x_x = self.model.predict(x, return_cov=True, return_tensor=True)[1]
-            loss = -torch.matmul(torch.matmul(cov_x_xucb.T, torch.linalg.inv(cov_x_x + 0.01 * torch.eye(len(cov_x_x)))), cov_x_xucb)
+            penalty = []
+            for i in itertools.combinations(range(self.n_workers), 2):
+                penalty.append(torch.clip(- 1./100. * torch.log(torch.norm(x[i[0]] - x[i[1]]) - 0.2), 0., torch.inf))
+            loss = -torch.matmul(torch.matmul(cov_x_xucb.T, torch.linalg.inv(cov_x_x + 0.01 * torch.eye(len(cov_x_x)))), cov_x_xucb) + sum(penalty)
             loss.backward()
             optimizer.step()
-            if projection and i > int(0.8 * training_iter):
-                init_x = torch.tensor(init_x)
-                lenth = torch.norm(x - init_x, dim=1).reshape([-1, 1])
-                x = torch.where((lenth > radius).reshape([-1, 1]), init_x + radius / lenth * (x-init_x), x)
-                x.detach_()                    
+            # if projection and i > int(0.8 * training_iter):
+            #     init_x = torch.tensor(self.current_robots_location)
+            #     lenth = torch.norm(x - init_x, dim=1).reshape([-1, 1])
+            #     x = torch.where((lenth > radius).reshape([-1, 1]), init_x + radius / lenth * (x-init_x), x)
+            #     x.detach_()
         return x.clone().detach().numpy()
 
     def _batch_upper_confidential_bound(self, a, x, n):
@@ -1231,6 +1239,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         """
         
         # record step indicator
+        self.current_robots_location = location
         self._record_step = False
         if plot:
             if self.optimizer_step % plot:
@@ -1347,39 +1356,39 @@ class BayesianOptimizationCentralized(bayesian_optimization):
 
         for a in range(1):
 
-            fig, ax = plt.subplots(1, 3, figsize=(10,4), sharey=True) # , sharex=True
-            (ax1, ax2, ax3) = ax
-            plt.setp(ax.flat, aspect=1.0, adjustable='box')
+            
+            (ax1, ax2) = self.ax
+            plt.setp(self.ax.flat, aspect=1.0, adjustable='box')
 
             N = 100
-            # Objective plot
-            Y_obj = [self.objective(i) for i in self._grid]
-            clev1 = np.linspace(min(Y_obj), max(Y_obj),N)
-            cp1 = ax1.contourf(X, Y, np.array(Y_obj).reshape(X.shape), clev1,  cmap = cm.coolwarm)
-            for c in cp1.collections:
-                c.set_edgecolor("face")
-            cbar1 = plt.colorbar(cp1, ax=ax1, shrink = 0.9, format=fmt, pad = 0.05, location='bottom')
-            cbar1.ax.tick_params(labelsize=10)
-            cbar1.ax.locator_params(nbins=5)
-            ax1.autoscale(False)
-            ax1.scatter(x[:, 0], x[:, 1], zorder=1, color = rgba[a], s = 10)
-            ax1.axvline(self._next_query[a][0], color='k', linewidth=1)
-            ax1.axhline(self._next_query[a][1], color='k', linewidth=1)
-            ax1.set_ylabel("y", fontsize = 10, rotation=0)
-            leg1 = ax1.legend(['Objective'], fontsize = 10, loc='upper right', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
-            ax1.add_artist(leg1)
-            ax1.set_xlim([first_param_grid[0], first_param_grid[-1]])
-            ax1.set_ylim([second_param_grid[0], second_param_grid[-1]])
-            ax1.set_xticks(np.linspace(first_param_grid[0],first_param_grid[-1], 5))
-            ax1.set_yticks(np.linspace(second_param_grid[0],second_param_grid[-1], 5))
-            plt.setp(ax1.get_yticklabels()[0], visible=False)
-            ax1.tick_params(axis='both', which='both', labelsize=10)
-            ax1.scatter(self.arg_max[:,0], self.arg_max[:,1], marker='x', c='gold', s=30)
+            # # Objective plot
+            # Y_obj = [self.objective(i) for i in self._grid]
+            # clev1 = np.linspace(min(Y_obj), max(Y_obj),N)
+            # cp1 = ax1.contourf(X, Y, np.array(Y_obj).reshape(X.shape), clev1,  cmap = cm.coolwarm)
+            # for c in cp1.collections:
+            #     c.set_edgecolor("face")
+            # cbar1 = plt.colorbar(cp1, ax=ax1, shrink = 0.9, format=fmt, pad = 0.05, location='bottom')
+            # cbar1.ax.tick_params(labelsize=10)
+            # cbar1.ax.locator_params(nbins=5)
+            # ax1.autoscale(False)
+            # ax1.scatter(x[:, 0], x[:, 1], zorder=1, color = rgba[a], s = 10)
+            # ax1.axvline(self._next_query[a][0], color='k', linewidth=1)
+            # ax1.axhline(self._next_query[a][1], color='k', linewidth=1)
+            # ax1.set_ylabel("y", fontsize = 10, rotation=0)
+            # leg1 = ax1.legend(['Objective'], fontsize = 10, loc='upper right', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
+            # ax1.add_artist(leg1)
+            # ax1.set_xlim([first_param_grid[0], first_param_grid[-1]])
+            # ax1.set_ylim([second_param_grid[0], second_param_grid[-1]])
+            # ax1.set_xticks(np.linspace(first_param_grid[0],first_param_grid[-1], 5))
+            # ax1.set_yticks(np.linspace(second_param_grid[0],second_param_grid[-1], 5))
+            # plt.setp(ax1.get_yticklabels()[0], visible=False)
+            # ax1.tick_params(axis='both', which='both', labelsize=10)
+            # ax1.scatter(self.arg_max[:,0], self.arg_max[:,1], marker='x', c='gold', s=30)
 
-            if self.n_workers > 1:
-                ax1.legend(["Iteration %d" % (iter), "Agent %d" % (a)], fontsize = 10, loc='upper left', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
-            else:
-                ax1.legend(["Iteration %d" % (iter)], fontsize = 10, loc='upper left', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
+            # if self.n_workers > 1:
+            #     ax1.legend(["Iteration %d" % (iter), "Agent %d" % (a)], fontsize = 10, loc='upper left', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
+            # else:
+            #     ax1.legend(["Iteration %d" % (iter)], fontsize = 10, loc='upper left', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
 
             # Surrogate plot
             d = 0
@@ -1443,19 +1452,21 @@ class BayesianOptimizationCentralized(bayesian_optimization):
             # # plt.setp(ax3.get_yticklabels()[-1], visible=False)
             # ax3.tick_params(axis='both', which='both', labelsize=10)
 
-            ax1.tick_params(axis='both', which='major', labelsize=10)
-            ax1.tick_params(axis='both', which='minor', labelsize=10)
+            # ax1.tick_params(axis='both', which='major', labelsize=10)
+            # ax1.tick_params(axis='both', which='minor', labelsize=10)
             ax2.tick_params(axis='both', which='major', labelsize=10)
             ax2.tick_params(axis='both', which='minor', labelsize=10)
             # ax3.tick_params(axis='both', which='major', labelsize=10)
             # ax3.tick_params(axis='both', which='minor', labelsize=10)
-            ax1.yaxis.offsetText.set_fontsize(10)
+            # ax1.yaxis.offsetText.set_fontsize(10)
             ax2.yaxis.offsetText.set_fontsize(10)
             # ax3.yaxis.offsetText.set_fontsize(10)
 
-            fig.subplots_adjust(wspace=0, hspace=0)
+            self.fig.subplots_adjust(wspace=0, hspace=0)
             plt.savefig(self._PDF_DIR_ + '/bo_iteration_%d_agent_%d.pdf' % (iter, a), bbox_inches='tight')
             plt.savefig(self._PNG_DIR_ + '/bo_iteration_%d_agent_%d.png' % (iter, a), bbox_inches='tight')
+            # plt.pause(0.1)
+            # plt.cla()
 
 
 

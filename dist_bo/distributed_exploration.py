@@ -9,6 +9,7 @@ import numpy as np
 from functools import partial
 from collections import deque
 import matplotlib.pyplot as plt
+from matplotlib import patches
 
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float32MultiArray,Bool,String,Float32
@@ -103,6 +104,7 @@ class distributed_seeking(Node):
 		self.position_control_step = 1
 		self.main_loop_step = 1
 		self.func = function_dict['ackley'].function
+		self.other_robot_locs = None
 		
 
 		qos = QoSProfile(depth=10)
@@ -123,6 +125,7 @@ class distributed_seeking(Node):
 			self.plot_timer = self.create_timer(self.plot_time, self.plot_callback)
 			plt.ion()
 			self.fig, self.ax = plt.subplots()
+				
 
 		""" 
 		Waypoint planning initializations 
@@ -222,10 +225,16 @@ class distributed_seeking(Node):
 		# self.req.y = float(loc[1])
 		# self.future = self.client.call_async(self.req)
 		# rclpy.spin_until_future_complete(self, self.future)
+		# loc = self.loc_transform(loc)
 		self.obs = -1.0 * self.func(loc)
 		self.get_logger().info('Receiced virtual source obs: {:.3f}'.format(self.obs))
 		# response = self.future.result()
 		# self.obs = response.obj
+
+	def loc_transform(self, loc, obj_type = 'ackley'):
+		if obj_type == 'ackley':
+			loc = [l / 5. for l in loc]
+		
 		
 
 	def query_virtual_source_callback(self):
@@ -259,14 +268,25 @@ class distributed_seeking(Node):
 			# in the step of obs published
 			pass
 		else:
+			time.sleep(0.5) # wait for other qu
 			other_target_locs = []
 			neighborhood_namespaces = self.neighborhood_namespaces.copy()
 			neighborhood_namespaces.remove(self.robot_namespace)
+			if 'Source0' in neighborhood_namespaces:
+				neighborhood_namespaces.remove('Source0')
 			for rbt_namespace in neighborhood_namespaces:
-				other_target_locs.append(self.robot_listeners[rbt_namespace].get_new_queries())
+				while True:
+					other_query = self.robot_listeners[rbt_namespace].get_new_queries()
+					if other_query is not None:
+						self.get_logger().info('Get {}\'s q: {}'.format(rbt_namespace, other_query))
+						other_target_locs.append(other_query)
+						break
+					else:
+						self.get_logger().info(rbt_namespace)
+						time.sleep(0.1)
 			free_space = RegionsIntersection(self.obstacle_detector.get_free_spaces(origins=other_target_locs))
 			self.target_loc = free_space.project_point(np.asarray([data.data[0], data.data[1]])).squeeze()
-			# self.get_logger().info('Get new target loc: ({:.3f}, {:.3f})'.format(self.target_loc[0], self.target_loc[1]))
+			self.get_logger().info('Get new target loc: ({:.3f}, {:.3f})'.format(self.target_loc[0], self.target_loc[1]))
 			self.main_loop_step = 1 # reset main loop to new step
 			self.target_reached = False
 
@@ -278,10 +298,13 @@ class distributed_seeking(Node):
 		neighborhood_namespaces = self.neighborhood_namespaces.copy()
 		neighborhood_namespaces.remove(self.robot_namespace)
 		for rbt_namespace in neighborhood_namespaces:
-			other_robot_locs.append(self.robot_listeners[rbt_namespace].get_latest_loc())
-		free_space = RegionsIntersection(self.obstacle_detector.get_free_spaces(origins=other_robot_locs))
-		self.look_ahead_target_loc = free_space.project_point_sideway(self.look_ahead_target_loc, my_loc)
-
+			neighbor_loc = self.robot_listeners[rbt_namespace].get_latest_loc()
+			if neighbor_loc is not None:
+				other_robot_locs.append(neighbor_loc)
+		self.other_robot_locs = other_robot_locs.copy()
+		if len(other_robot_locs) > 0:
+			free_space = RegionsIntersection(self.obstacle_detector.get_free_spaces(origins=other_robot_locs))
+			self.look_ahead_target_loc = free_space.project_point_sideway(self.look_ahead_target_loc, my_loc)
 
 	def FIRST_FOUND_callback_(self,data):
 		
@@ -608,16 +631,17 @@ class distributed_seeking(Node):
 					angular_velocity = 0.4  # unit: rad/s
 
 					self.project_target_loc(loc)
-					if self.id == 1:
-						self.get_logger().info('target loc: {}'.format(self.target_loc))
-						self.get_logger().info('look ahead loc: {}'.format(self.look_ahead_target_loc))
 					distance = math.sqrt(
 						(self.look_ahead_target_loc[1] - loc[1])**2 +
 						(self.look_ahead_target_loc[0] - loc[0])**2)
 					path_theta = math.atan2(
 						self.look_ahead_target_loc[1] - loc[1],
 						self.look_ahead_target_loc[0] - loc[0])
-					if path_theta > 0.5 * math.pi:
+					angle = truncate_angle(path_theta - yaw)
+					# if self.id == 1:
+					# 	self.get_logger().info('distance: {:.3f}, path_theta:{:.3f}, yaw: {:.3f}, angle: {:.3f}'.format(distance, path_theta, yaw, angle))
+						# self.get_logger().info('look ahead loc: {}'.format(self.look_ahead_target_loc))
+					if abs(angle) > 0.5 * math.pi:
 						twist = stop_twist()
 						self.position_control_step = 1
 					else:
@@ -641,17 +665,29 @@ class distributed_seeking(Node):
 
 
 	def plot_callback(self):
-		try:
-			self.ax.plot(self.waypoints[:,0],self.waypoints[:,1])
-			my_loc = self.get_my_loc()
-			print(my_loc,type(my_loc))
+		# try:
+		self.ax.scatter(self.look_ahead_target_loc[0], self.look_ahead_target_loc[1],c='blue',s=20)
+		self.ax.scatter(self.target_loc[0], self.target_loc[1],c='green',s=20)
+		my_loc = self.get_my_loc()
+		my_yaw = self.get_my_yaw()
+		if my_loc is not None and my_yaw is not None:
+			self.ax.arrow(my_loc[0],my_loc[1],0.2 * np.cos(my_yaw), 0.2 * np.sin(my_yaw))
 			self.ax.scatter(my_loc[0],my_loc[1],c='Red',s=20)
-			plt.xlim(0, 1.2)
-			plt.ylim(-3, 0)
-			plt.pause(0.05)
-			plt.cla()
-		except:
-			pass
+		def plot_others(loc):
+			self.ax.add_patch(patches.Circle(loc, 0.11 * 2.5, fc = 'none', ec = 'red'))
+		if self.other_robot_locs is not None:
+			for loc in self.other_robot_locs:
+				if loc is not None:
+					plot_others(loc)
+		plt.axis('equal')
+		plt.xlim(-3, 3)
+		plt.ylim(-3, 3)
+		plt.title(self.robot_namespace)
+		plt.pause(0.05)
+		plt.cla()
+		# except:
+		# 	pass
+			
 
 	def query_source_callback(self, data):
 		query_points = data.data
