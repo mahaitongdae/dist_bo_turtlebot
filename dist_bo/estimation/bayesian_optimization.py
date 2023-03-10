@@ -913,7 +913,7 @@ class ExactGPModel(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):
         super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
         self.mean_module = gpytorch.means.ConstantMean()
-        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel())
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
 
     def forward(self, x):
         mean_x = self.mean_module(x)
@@ -1000,7 +1000,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
                  acquisition_function = 'ei', policy = 'greedy', fantasies = 0,
                  epsilon = 0.01, regularization = None, regularization_strength = None,
                  pending_regularization = None, pending_regularization_strength = None,
-                 grid_density = 100, x0=None, n_pre_samples=5, args=dict()):
+                 grid_density = 100, x0=None, n_pre_samples=5, data_dir=None, args=dict()):
 
         super(BayesianOptimizationCentralized, self).__init__(objective, domain=domain, arg_max=arg_max, n_workers=n_workers,
                  network=network, kernel=kernel, alpha=alpha,
@@ -1020,15 +1020,17 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         else:
             print('Supported acquisition functions: ei, ts, es, bucb, ucbpe')
 
-        self._ROOT_DIR_ = 'results'
-
-        self._TEMP_DIR_ = os.path.join(self._ROOT_DIR_, self.args.objective)
-        self._ID_DIR_ = os.path.join(self._TEMP_DIR_, self._DT_)
-        self._DATA_DIR_ = os.path.join(self._ID_DIR_, "data")
+        if data_dir is None:
+            self._ROOT_DIR_ = '/home/mht/turtlebot3_ws/src/dist_bo/results'
+            self._TEMP_DIR_ = os.path.join(self._ROOT_DIR_, self.args.objective)
+            self._ID_DIR_ = os.path.join(self._TEMP_DIR_, self._DT_)
+            self._DATA_DIR_ = os.path.join(self._ID_DIR_, "data")
+        else:
+            self._DATA_DIR_ = data_dir
         self._FIG_DIR_ = os.path.join(self._DATA_DIR_, "figures")
         self._PNG_DIR_ = os.path.join(self._FIG_DIR_, "png")
         self._PDF_DIR_ = os.path.join(self._FIG_DIR_, "pdf")
-        for path in [self._ROOT_DIR_,self._TEMP_DIR_, self._DATA_DIR_,self._FIG_DIR_, self._PNG_DIR_,self._PDF_DIR_]: #  self._FIG_DIR_, self._PNG_DIR_, self._PDF_DIR_, self._GIF_DIR_
+        for path in [self._DATA_DIR_,self._FIG_DIR_, self._PNG_DIR_,self._PDF_DIR_]: #  self._FIG_DIR_, self._PNG_DIR_, self._PDF_DIR_, self._GIF_DIR_
             try:
                 os.makedirs(path, exist_ok=True)
             except FileExistsError:
@@ -1037,6 +1039,7 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         # Reset model and data before each run
         self._next_query = [np.array([0.0,1.0]), np.array([0.0,2.0])]
         # self.bc_data = [[[] for j in range(self.n_workers)] for i in range(self.n_workers)]
+        self.amaxmean = None
 
         self.X = []
         self.Y = []
@@ -1064,12 +1067,15 @@ class BayesianOptimizationCentralized(bayesian_optimization):
 
         self.optimizer_step = 0
 
-        # plt.ion()
-        self.fig, self.ax = plt.subplots(1, 2, figsize=(10,4), sharey=True) # , sharex=True
+        plt.ion()
+        self.fig, self.ax = plt.subplots(1, 1, figsize=(6,6), sharey=True) # , sharex=True
+        # man = plt.get_current_fig_manager()
+        # man.canvas.set_window_title("GP mean value")
+        self._plot_iteration(0, 0)
         
         return
 
-    def _entropy_search_grad(self, a, x, n, projection=True, radius=0.8):
+    def _entropy_search_grad(self, a, x, n, projection=True, radius=0.5):
         """
                 Entropy search acquisition function.
                 Args:
@@ -1090,6 +1096,8 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         ucb = mu + self.beta * sigma
         amaxucb = x[np.argmax(ucb.clone().detach().numpy())][np.newaxis, :]
         self.amaxucb = amaxucb
+        amaxmean = x[np.argmax(mu.clone().detach().numpy())][np.newaxis, :]
+        self.amaxmean = amaxmean
         # x = np.vstack([amaxucb for _ in range(self.n_workers)])
         # if projection:
         #     init_x = self.X[-1 * self.n_workers:]
@@ -1098,18 +1106,20 @@ class BayesianOptimizationCentralized(bayesian_optimization):
 
         x = torch.tensor(init_x, requires_grad=True)
         optimizer = torch.optim.Adam([x], lr=0.1)
-        training_iter = 500
+        training_iter = 200
         for i in range(training_iter):
             optimizer.zero_grad()
             joint_x = torch.vstack((x,torch.tensor(amaxucb)))
             cov_x_xucb = self.model.predict(joint_x, return_cov=True, return_tensor=True)[1][-1, :-1].reshape([-1,1])
             cov_x_x = self.model.predict(x, return_cov=True, return_tensor=True)[1]
             penalty = []
-            for i in itertools.combinations(range(self.n_workers), 2):
-                penalty.append(torch.clip(- 1./100. * torch.log(torch.norm(x[i[0]] - x[i[1]]) - 0.2), 0., torch.inf))
+            for j in itertools.combinations(range(self.n_workers), 2):
+                penalty.append(torch.clip(- 1./100. * torch.log(torch.norm(x[j[0]] - x[j[1]]) - 0.2), 0., torch.inf))
             loss = -torch.matmul(torch.matmul(cov_x_xucb.T, torch.linalg.inv(cov_x_x + 0.01 * torch.eye(len(cov_x_x)))), cov_x_xucb) + sum(penalty)
             loss.backward()
             optimizer.step()
+            x = torch.clip(x, torch.stack([torch.tensor(self.domain[:, 0])] * len(x)), torch.stack([torch.tensor(self.domain[:, 1])] * len(x)))
+            x.detach_()
             # if projection and i > int(0.8 * training_iter):
             #     init_x = torch.tensor(self.current_robots_location)
             #     lenth = torch.norm(x - init_x, dim=1).reshape([-1, 1])
@@ -1357,39 +1367,10 @@ class BayesianOptimizationCentralized(bayesian_optimization):
         for a in range(1):
 
             
-            (ax1, ax2) = self.ax
-            plt.setp(self.ax.flat, aspect=1.0, adjustable='box')
+            ax2 = self.ax
+            # plt.setp(self.ax.flat, aspect=1.0, adjustable='box')
 
             N = 100
-            # # Objective plot
-            # Y_obj = [self.objective(i) for i in self._grid]
-            # clev1 = np.linspace(min(Y_obj), max(Y_obj),N)
-            # cp1 = ax1.contourf(X, Y, np.array(Y_obj).reshape(X.shape), clev1,  cmap = cm.coolwarm)
-            # for c in cp1.collections:
-            #     c.set_edgecolor("face")
-            # cbar1 = plt.colorbar(cp1, ax=ax1, shrink = 0.9, format=fmt, pad = 0.05, location='bottom')
-            # cbar1.ax.tick_params(labelsize=10)
-            # cbar1.ax.locator_params(nbins=5)
-            # ax1.autoscale(False)
-            # ax1.scatter(x[:, 0], x[:, 1], zorder=1, color = rgba[a], s = 10)
-            # ax1.axvline(self._next_query[a][0], color='k', linewidth=1)
-            # ax1.axhline(self._next_query[a][1], color='k', linewidth=1)
-            # ax1.set_ylabel("y", fontsize = 10, rotation=0)
-            # leg1 = ax1.legend(['Objective'], fontsize = 10, loc='upper right', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
-            # ax1.add_artist(leg1)
-            # ax1.set_xlim([first_param_grid[0], first_param_grid[-1]])
-            # ax1.set_ylim([second_param_grid[0], second_param_grid[-1]])
-            # ax1.set_xticks(np.linspace(first_param_grid[0],first_param_grid[-1], 5))
-            # ax1.set_yticks(np.linspace(second_param_grid[0],second_param_grid[-1], 5))
-            # plt.setp(ax1.get_yticklabels()[0], visible=False)
-            # ax1.tick_params(axis='both', which='both', labelsize=10)
-            # ax1.scatter(self.arg_max[:,0], self.arg_max[:,1], marker='x', c='gold', s=30)
-
-            # if self.n_workers > 1:
-            #     ax1.legend(["Iteration %d" % (iter), "Agent %d" % (a)], fontsize = 10, loc='upper left', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
-            # else:
-            #     ax1.legend(["Iteration %d" % (iter)], fontsize = 10, loc='upper left', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
-
             # Surrogate plot
             d = 0
             if mu.reshape(X.shape).max() - mu.reshape(X.shape).min() == 0:
@@ -1398,15 +1379,18 @@ class BayesianOptimizationCentralized(bayesian_optimization):
             cp2 = ax2.contourf(X, Y, mu.reshape(X.shape), clev2,  cmap = cm.coolwarm)
             for c in cp2.collections:
                 c.set_edgecolor("face")
-            cbar2 = plt.colorbar(cp2, ax=ax2, shrink = 0.9, format=fmt, pad = 0.05, location='bottom')
-            cbar2.ax.tick_params(labelsize=10)
-            cbar2.ax.locator_params(nbins=5)
+            # cbar2 = plt.colorbar(cp2, ax=ax2, shrink = 0.9, format=fmt, pad = 0.05, location='bottom')
+            # cbar2.ax.tick_params(labelsize=10)
+            # cbar2.ax.locator_params(nbins=5)
             ax2.autoscale(False)
-            ax2.scatter(x[:, 0], x[:, 1], zorder=1, color = rgba[a], s = 10)
+            if len(x)> 0:
+                ax2.scatter(x[:, 0], x[:, 1], zorder=1, color = rgba[a], s = 20)
+                ax2.scatter(x[-self.n_workers:, 0], x[-self.n_workers:, 1], zorder=1, color = 'red', s = 20)
             if self._acquisition_function in ['es', 'ucb']:
                 ax2.scatter(self.amaxucb[0, 0], self.amaxucb[0, 1], marker='o', c='red', s=30)
-            ax2.axvline(self._next_query[a][0], color='k', linewidth=1)
-            ax2.axhline(self._next_query[a][1], color='k', linewidth=1)
+            # ax2.scatter(-1.25, 2.66, marker='*', c='red', s=30)
+            # ax2.axvline(self._next_query[a][0], color='k', linewidth=1)
+            # ax2.axhline(self._next_query[a][1], color='k', linewidth=1)
             ax2.set_ylabel("y", fontsize = 10, rotation=0)
             ax2.legend(['Surrogate'], fontsize = 10, loc='upper right', handletextpad=0, handlelength=0, fancybox=True, framealpha = 0.2)
             ax2.set_xlim([first_param_grid[0], first_param_grid[-1]])
@@ -1465,8 +1449,8 @@ class BayesianOptimizationCentralized(bayesian_optimization):
             self.fig.subplots_adjust(wspace=0, hspace=0)
             plt.savefig(self._PDF_DIR_ + '/bo_iteration_%d_agent_%d.pdf' % (iter, a), bbox_inches='tight')
             plt.savefig(self._PNG_DIR_ + '/bo_iteration_%d_agent_%d.png' % (iter, a), bbox_inches='tight')
-            # plt.pause(0.1)
-            # plt.cla()
+            plt.pause(5.)
+            plt.cla()
 
 
 

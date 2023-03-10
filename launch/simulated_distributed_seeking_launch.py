@@ -56,7 +56,7 @@ def generate_launch_description():
 	
 	execs.extend([Node(package = 'dist_bo',
 		executable = 'visualize',
-		arguments = ['Odom', ','.join(mobile_sensors)])])
+		arguments = ['Odom', ','.join(mobile_sensors), '0'])])
 	
 	
 	return LaunchDescription(execs)

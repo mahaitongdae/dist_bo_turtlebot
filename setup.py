@@ -31,11 +31,13 @@ setup(
     entry_points={
         'console_scripts': [
             'distributed_exploration = dist_bo.distributed_exploration:main',
+            'distributed_exploration_real = dist_bo.distributed_exploration_real:main',
             'visualize = dist_bo.visualization:main',
             'virtual_sensor = dist_bo.virtual_sensor:main',
             'centralized_decision = dist_bo.centralized_decision:main',
             'client = dist_bo.client_member_function:main',
             'spawn_entity = dist_bo.spawn_entity:main',
+            'move = dist_bo.MISSION_CONTROL.MOVE:main',
         ],
     },
 )

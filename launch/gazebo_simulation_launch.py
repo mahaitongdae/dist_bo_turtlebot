@@ -67,10 +67,10 @@ def generate_launch_description():
 
       
     # execs = []
-    execs.append(Node(package = 'dist_bo',
-                executable = 'virtual_sensor',
-                arguments = ['Odom',','.join(sensor_names),','.join(source_names)]
-                ))
+    # execs.append(Node(package = 'dist_bo',
+    #             executable = 'virtual_sensor',
+    #             arguments = ['Odom',','.join(sensor_names),','.join(source_names)]
+    #             ))
     # execs.extend([Node(package='fim_track_2',executable='virtual_coef',arguments=[name]) for name in sensor_names])
 
   

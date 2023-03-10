@@ -1,5 +1,5 @@
 {
-    "objective": "ackley",
+    "objective": "real",
     "constraint": "disk",
     "model": "torch",
     "n_workers": 2,

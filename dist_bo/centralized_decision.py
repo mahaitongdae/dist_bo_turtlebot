@@ -31,11 +31,11 @@ from std_srvs.srv import Trigger
 from visualization import Visulizer
 
 function_dict = {'bird':Bird(), 'disk':Disk(), 'ackley': Ackley(), 'rosenbrock': Rosenbrock(),
-                 'eggholder': Eggholder()}
+                 'eggholder': Eggholder(), 'real': Real()}
 
 class CentralizedDecision(Node):
 
-    def __init__(self, pose_type_string, all_robot_namespace):
+    def __init__(self, pose_type_string, all_robot_namespace, data_dir=None):
         super().__init__('bo_central')
         self.pose_type_string = pose_type_string
         self.robot_listeners = {namespace:robot_listener(self, namespace, self.pose_type_string, central=True)\
@@ -52,10 +52,13 @@ class CentralizedDecision(Node):
         # publisher for each agent
         self.queries_publishers_ = [self.create_publisher(Float32MultiArray, '/{}/new_queries'.format(robot_namespace), 10) for robot_namespace in all_robot_namespace]
         # one publisher for queries
-        # self.queries_publishers_ = self.create_publisher(Float32MultiArray, '/new_queries', 10)
+        self.visulize_publishers_ = self.create_publisher(Float32MultiArray, '/bo_central/to_visualize', 10)
 
         self.update_obs_time = 1.
         self.create_timer(self.update_obs_time, self.update_obs_callback) 
+
+        # self.plot_time = 1.
+        # self.create_timer(self.plot_time, self.plot_cbk)
 
         # self.vis_fps = 30
         # self.create_timer(1 / self.vis_fps, self.update_rbt_locs_callback)          
@@ -72,7 +75,7 @@ class CentralizedDecision(Node):
         self.bayesian_optimization_model = BayesianOptimizationCentralized(objective=function_dict.get(algo_args.objective),
                                                                             domain=function_dict.get(algo_args.objective).domain,
                                                                             arg_max=arg_max,
-                                                                            n_workers=algo_args.n_workers,
+                                                                            n_workers=len(all_robot_namespace),
                                                                             network=N,
                                                                             kernel='Matern',
                                                                             # length_scale_bounds=(1, 1000.0)
@@ -84,6 +87,7 @@ class CentralizedDecision(Node):
                                                                             pending_regularization=algo_args.pending_regularization,
                                                                             pending_regularization_strength=algo_args.pending_regularization_strength,
                                                                             grid_density=algo_args.grid_density,
+                                                                            data_dir=data_dir,
                                                                             args=algo_args)
         
         self.update_in_progress = False
@@ -118,10 +122,15 @@ class CentralizedDecision(Node):
                     lowest_dist = dist.copy()
                     assigned_seq = sequence
             self.get_logger().info('set assign queries sequence: {}'.format(assigned_seq))
-            for i, publisher in enumerate(self.queries_publishers_):  
-                flattern_q = self.next_queries[assigned_seq[i]].tolist()
-                msg.data = flattern_q
-                publisher.publish(msg)
+            for i in range(10):
+                for i, publisher in enumerate(self.queries_publishers_):  
+                    flattern_q = self.next_queries[assigned_seq[i]].tolist()
+                    msg.data = flattern_q
+                    publisher.publish(msg)
+
+            msg_ucb = Float32MultiArray()
+            msg_ucb.data = self.bayesian_optimization_model.amaxmean.squeeze().tolist()
+            self.visulize_publishers_.publish(msg_ucb)
             # msg.data = self.next_queries.reshape([-1]).tolist()
             # self.queries_publishers_.publish(msg)
             time.sleep(1.0) # wait the msg sent to robot nodes
@@ -142,13 +151,19 @@ class CentralizedDecision(Node):
     #     self.visulizer.set_robot_loc(location)
     #     self.get_logger().info('set robot loc')
 
+    def plot_cbk(self):
+        self.bayesian_optimization_model._plot_iteration(self.bayesian_optimization_model.optimizer_step, 0)
+
 
 def main(args=sys.argv):
     rclpy.init(args=args)
     pose_type = args[1]
     all_robots_namespace = args[2].split(',')
+    data_dir = args[3]
+    if 'dist_bo' not in data_dir:
+        data_dir = None
 
-    centralized_decision = CentralizedDecision(pose_type, all_robots_namespace)
+    centralized_decision = CentralizedDecision(pose_type, all_robots_namespace, data_dir=data_dir)
 
     rclpy.spin(centralized_decision)
 

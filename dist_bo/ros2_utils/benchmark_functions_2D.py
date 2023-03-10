@@ -21,6 +21,18 @@ class Ackley:
         self.min = 0
         self.arg_min = np.array([[0,0]])
 
+class fakeAckley:
+    def __init__(self):
+        self.domain = np.array([[-3., 0.], [0., 3.5]])
+        # self.function = lambda x: -20*np.exp(-0.2*np.sqrt(0.5*(x[0]**2 + x[1]**2))) - np.exp(0.5*(np.cos(2*np.pi*x[0]) + np.cos(2*np.pi*x[1]))) + np.exp(1) + 20
+        self.min = 0
+        self.arg_min = np.array([[0,0]])
+
+    def function(self, x):
+        x = (2. * (x[0]/ + 1.05), 2. * (x[1] - 1.64))
+        value = -20*np.exp(-0.2*np.sqrt(0.5*(x[0]**2 + x[1]**2))) - np.exp(0.5*(np.cos(2*np.pi*x[0]) + np.cos(2*np.pi*x[1]))) + np.exp(1) + 20
+        return value
+
 
 class Rastrigin:
     def __init__(self):
@@ -59,6 +71,14 @@ class Bird:
         self.function = lambda x: np.sin(x[0])*np.exp((1-np.cos(x[1]))**2) + np.cos(x[1])*np.exp((1-np.sin(x[0]))**2) + (x[0]-x[1])**2
         self.min = - 106.764537
         self.arg_min = np.array([[4.70104, 3.15294],[-1.58214,-3.13024]])
+
+class Real:
+    def __init__(self):
+        self.domain = np.array([[-3., 0.], [0., 3.5]])
+        self.function = lambda x: np.sin(x[0])*np.exp((1-np.cos(x[1]))**2) + np.cos(x[1])*np.exp((1-np.sin(x[0]))**2) + (x[0]-x[1])**2
+        self.min = - 106.764537
+        self.arg_min = np.array([[4.70104, 3.15294],[-1.58214,-3.13024]])
+
 
 class Branin:
     def __init__(self):

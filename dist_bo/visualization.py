@@ -17,13 +17,15 @@ import rclpy
 from rclpy.qos import QoSProfile
 from rclpy.node import Node
 from math import pi, cos, sin
+from collections import deque
 
 tools_root = os.path.join(os.path.dirname(__file__))
 sys.path.insert(0, os.path.abspath(tools_root))
 
 from ros2_utils.robot_listener import robot_listener
 SCALE = 4
-SIZE = 1000
+SIZE = 800
+INITLOC = (700, 0)
 
 class Visulizer(object):
 
@@ -59,7 +61,7 @@ class Visulizer(object):
         glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH)
         glutInitContextProfile(GLUT_CORE_PROFILE)
         glutInitWindowSize(SIZE,SIZE)
-        glutInitWindowPosition(460, 0)
+        glutInitWindowPosition(INITLOC[0], INITLOC[1])
         glutCreateWindow('Distributed Bayesian Optimization')
         glutDisplayFunc(self.render)
         glutIdleFunc(self.render)
@@ -150,25 +152,24 @@ class Visulizer(object):
 
 class VisulizerNode(Node):
 
-    def __init__(self, pose_type_string, all_robot_namespace):
+    def __init__(self, pose_type_string, all_robot_namespace, center=(0., 0.), scale=4.):
         super().__init__('visulization')
-        self.robot_listeners = {namespace: robot_listener(self, namespace, pose_type_string)\
+        self.robot_listeners = {namespace: robot_listener(self, namespace, pose_type_string, visualizer=True)\
 						 for namespace in all_robot_namespace}
-        # self.subscription  # prevent unused variable warning
-        # self.waypoints = np.asarray([[0.0,0.0]])
-        # self.plot_time = 0.1
-        # self.plot_timer = self.create_timer(self.plot_time, self.plot_callback)
-        # plt.ion()
-        # self.fig, self.ax = plt.subplots()
-        # ax.scatter(0,0)
-        # plt.show()
+        qos = QoSProfile(depth=10)
+        self.central_listeners = self.create_subscription(Float32MultiArray, '/bo_central/to_visualize', self.central_listeners_cbk, qos)
+        self.amaxucb_loc = None
+
         self.i = 0
-        # self._opengl_start()
         self.opengl_frame_rate = 30
         self.vis_fps = 30
         self.create_timer(1 / self.vis_fps, self.update_loc_cbk)
         self.robot_locs = [None]   
-        self.robot_targets = [None]       
+        self.robot_targets = [None]
+        self.robot_look_ahead_targets = [None]
+        self.center = center
+        self.get_logger().info('center is {}'.format(self.center))
+        self.scale = scale
         
         self.cli = self.create_client(AddTwoInts, 'add_two_ints')
         while not self.cli.wait_for_service(timeout_sec=1.0):
@@ -176,16 +177,15 @@ class VisulizerNode(Node):
         self.req = AddTwoInts.Request()
         self.run()
 
+    def central_listeners_cbk(self, msg):
+        self.amaxucb_loc = msg.data
+
     def send_request(self, a, b):
         self.req.a = a
         self.req.b = b
         self.future = self.cli.call_async(self.req)
         rclpy.spin_until_future_complete(self, self.future)
-        # self.get_logger().info(
-        # 'Result of add_two_ints: for %d + %d = %d' %
-        # (int(a), int(b), self.future.result().sum))
         return self.future.result()
-
 
     def listener_callback(self, msg):
         self.get_logger().info('msg data type "%s"' % type(msg.data))
@@ -195,7 +195,6 @@ class VisulizerNode(Node):
     def run(self):
         time.sleep(1.)
         self._opengl_start()
-
 
     def _opengl_start(self):
         glutInit()
@@ -217,6 +216,9 @@ class VisulizerNode(Node):
         n = len(str)
         for i in range(n):
             glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_24, ord(str[i]))
+
+    def loc2screen(self, loc):
+        return (loc[0] - self.center[0]) / self.scale, (loc[1] - self.center[1]) / self.scale
 
     def render(self, real_x=0, real_y=0, scale=SCALE, **kwargs):
         LOC_X = -real_x / scale
@@ -259,10 +261,16 @@ class VisulizerNode(Node):
                 glColor3f(0.2, 0.3, 0.9)
             elif color == 'g':
                 glColor3f(0.5, 1.0, 0.0)
+            elif color == 'r' or color == 'red':
+                glColor3f(1.0, 0.05, 0.05)
+            elif color == 'lr' or color == 'lighter_red':
+                glColor3f(1.0, 0.5, 0.5)
             else:
                 glColor3f(1.0, 1.0, 1.0)
 
         def draw_circle(center, radius, side_num = 100, edge_only = True, color = 'w'):
+            center = self.loc2screen(center)
+            radius = radius / self.scale
             if(edge_only):
                 glBegin(GL_LINE_LOOP)
             else:
@@ -270,7 +278,7 @@ class VisulizerNode(Node):
             get_gl_color(color)                        
             for vertex in range(0, side_num):
                 angle  = float(vertex) * 2.0 * pi / side_num
-                glVertex2f(center[0] + cos(angle)*radius, center[1] +  sin(angle)*radius)
+                glVertex2f(center[0] + cos(angle) * radius, center[1] +  sin(angle)*radius)
     
             glEnd()
 
@@ -292,30 +300,56 @@ class VisulizerNode(Node):
             glVertex2f(center[0] + len * np.cos(direction) + 0.3 * len * np.cos(direction + 7 / 6 * np.pi), center[1] + len * np.sin(direction) + 0.3 * len * np.sin(direction + 7 / 6 * np.pi))
             glEnd()
 
-            
+        
+                
+        def draw_light(center, color = 'o', size=1.):
+            draw_circle(center, size * 0.1, edge_only=False, color=color)
+            center_in_screen = self.loc2screen(center)
+            for direction in np.linspace(0, 2 * np.pi, 8):
+                for lower_direction in np.linspace(direction-0.01, direction+0.01, 20):
+                    glBegin(GL_LINES)
+                    get_gl_color(color=color)
+                    glVertex2f(center_in_screen[0] + size * 0.04 * np.cos(lower_direction), center_in_screen[1] + 0.04 * np.sin(lower_direction))
+                    glVertex2f(center_in_screen[0] + size * 0.06 * np.cos(lower_direction), center_in_screen[1] + 0.06 * np.sin(lower_direction))
+                    glEnd()
 
+        # estimated source loc
+        if self.amaxucb_loc is not None:
+                # draw_light(self.amaxucb_loc, color='o')
+                self._text('estimate maximum: ({:.3f}, {:.3f})'.format(self.amaxucb_loc[0], self.amaxucb_loc[1]), 2, 'left')
+
+        # draw_light([0., 0.], color='red')
+        draw_light([-1.25, 2.24], color='red')
+        draw_light([-1.25, 1.66], color='lr', size=0.8)
+        draw_light([-1.55, 1.96], color='lr', size=0.8)
+        draw_light([-0.85, 1.96], color='lr', size=0.8)
         
         # robot_locs = [[0.,0.]]
         for i, loc in enumerate(self.robot_locs):
             if loc is not None:
-                draw_circle([l / SCALE for l in loc], radius=0.11 * 2.5 / SCALE, color='blue')
-                draw_circle([l / SCALE for l in loc], radius=0.05 / SCALE, edge_only = False, color='blue')
+                draw_circle(loc, radius=0.11 * 2.5, color='blue')
+                draw_circle(loc, radius=0.05, edge_only = False, color='blue')
                 # self.get_logger().info('draw robot at {}, {}'.format(loc[0] / SCALE, loc[1]/ scale))
                 if self.robot_yaw[i] is not None:
-                    draw_arrow([l / SCALE for l in loc], self.robot_yaw[i], len=0.11 * 2.5 / SCALE, color='blue')
+                    draw_arrow(self.loc2screen(loc), self.robot_yaw[i], len=0.11 * 2.5 / SCALE, color='blue')
                 
 
         for i, loc in enumerate(self.robot_targets):
             if loc is not None:
                 # draw_circle([l / SCALE for l in loc], radius=0.11 * 2.5 / SCALE, color='g')
-                draw_circle([l / SCALE for l in loc], radius=0.05 / SCALE, edge_only = False, color='g')
+                draw_circle(loc, radius=0.05, edge_only = False, color='g')
                 # self.get_logger().info('draw robot at {}, {}'.format(loc[0] / SCALE, loc[1]/ scale))
                 if self.robot_locs[i] is not None:
                     glBegin(GL_LINES)
                     glColor3f(1.0, 1.0, 1.0)
-                    glVertex2f(self.robot_locs[i][0] / SCALE, self.robot_locs[i][1]/SCALE)
-                    glVertex2f(self.robot_targets[i][0] / SCALE, self.robot_targets[i][1]/SCALE)
+                    glVertex2f(*self.loc2screen(self.robot_locs[i]))
+                    glVertex2f(*self.loc2screen(self.robot_targets[i]))
                     glEnd()
+
+        for i, loc in enumerate(self.robot_look_ahead_targets):
+            if loc is not None:
+                # draw_circle([l / SCALE for l in loc], radius=0.11 * 2.5 / SCALE, color='g')
+                draw_circle(loc, radius=0.05, edge_only = False, color='y')
 
 
         # self.get_logger().info('loc array {}'.format(self.robot_locs))
@@ -332,6 +366,8 @@ class VisulizerNode(Node):
         self.robot_locs = [listener.get_latest_loc() for _, listener in self.robot_listeners.items()]
         self.robot_yaw = [listener.get_latest_yaw() for _, listener in self.robot_listeners.items()]
         self.robot_targets = [listener.get_new_queries() for _, listener in self.robot_listeners.items()]
+        self.robot_look_ahead_targets = [listener.get_look_ahead_target() for _, listener in self.robot_listeners.items()]
+        
         # self.get_logger().info("update robot locs")
 
     # def set_robot_loc(self, robot_locs):
@@ -343,8 +379,9 @@ def main(args=sys.argv):
     rclpy.init(args=args)
     pose_type = args[1]
     all_robots_namespace = args[2].split(',')
-
-    visulizer = VisulizerNode(pose_type, all_robots_namespace)
+    is_real_exp = int(args[3])
+    center = (-1.5, 2.0) if is_real_exp else (0., 0.)
+    visulizer = VisulizerNode(pose_type, all_robots_namespace, center=center)
 
     # future = visulizer.run()
 
